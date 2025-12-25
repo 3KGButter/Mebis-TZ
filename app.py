@@ -1,34 +1,51 @@
 import streamlit as st
 import pandas as pd
+from streamlit_gsheets import GSheetsConnection
 
-# 1. Titel und Konfiguration
 st.set_page_config(page_title="TZ Gamification", page_icon="📐")
-
 st.title("📐 Technisches Zeichnen - XP Dashboard")
 
-# 2. Begrüßung
-st.write("Willkommen im Gamification-Hub der FOS!")
+# 1. Verbindung zu Google Sheets herstellen
+# Ersetze den Link unten mit DEINEM Link zur Tabelle "XP Rechner"
+url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q/edit?gid=1717673199#gid=1717673199"
 
-# 3. Kleiner interaktiver Test
-st.info("Das ist der erste Prototyp deiner App.")
-
-# Ein simulierter Login (später machen wir das echt)
-user_input = st.text_input("Gib deinen Gamertag ein (z.B. ElArg):")
-
-if user_input:
-    st.success(f"Hallo {user_input}! Deine Daten werden geladen...")
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Wir laden das Blatt "XP Rechner 3.0" (oder wie dein Hauptblatt heißt)
+    df = conn.read(spreadsheet=url, worksheet="XP Rechner 3.0")
     
-    # Hier simulieren wir Daten - später kommen die aus deiner Google Tabelle
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Level", "12", "+1")
-    col2.metric("XP", "1540", "+220")
-    col3.metric("Coins 🪙", "50", "neu")
+    st.success("✅ Verbindung zur Datenbank erfolgreich!")
     
-    st.progress(75, text="Fortschritt bis Level 13")
+    # 2. Login Bereich
+    gamertag_input = st.text_input("Gib deinen Gamertag ein:")
 
-# 4. Der Shop Teaser
-st.divider()
-st.subheader("🛒 Item Shop (Preview)")
-with st.expander("3D Druck Gutschein ansehen"):
-    st.write("Kosten: 500 Coins")
-    st.button("Kaufen (noch inaktiv)")
+    if gamertag_input:
+        # Wir suchen den Schüler im DataFrame
+        # Wir gehen davon aus, dass die Spalte in Google Sheets "Gamertag" heißt
+        user_data = df[df['Gamertag'] == gamertag_input]
+
+        if not user_data.empty:
+            st.balloons() # Konfetti zur Begrüßung!
+            
+            # Daten aus der Zeile holen (iloc[0] nimmt den ersten Treffer)
+            # Pass die Spaltennamen an exakt so an, wie sie in deiner Tabelle stehen!
+            level = user_data.iloc[0]['Level'] 
+            xp = user_data.iloc[0]['XP']
+            rank = user_data.iloc[0]['Rang'] # Falls du eine Rang-Spalte hast
+
+            # Metriken anzeigen
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Dein Rang", rank)
+            col2.metric("Level", level)
+            col3.metric("XP Total", xp)
+            
+            st.divider()
+            st.subheader("🛒 Shop")
+            st.info("Hier kannst du bald deine XP/Coins ausgeben!")
+            
+        else:
+            st.error("Gamertag nicht gefunden. Tippfehler?")
+            
+except Exception as e:
+    st.error(f"Verbindungsfehler: {e}")
+    st.info("Tipp: Hast du die Tabelle für 'streamlit-bot@...' freigegeben und den Link im Code eingetragen?")
