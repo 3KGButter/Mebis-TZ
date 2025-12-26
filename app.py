@@ -231,3 +231,4 @@ if gamertag_input:
                         st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
     else:
         st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
+
