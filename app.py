@@ -148,6 +148,7 @@ try:
                 st.warning("Quest-Daten nicht verfügbar.")
                 st.stop()
 
+            # Questnamen in Zeile 2, XP in Zeile 5 (0-indiziert)
             quest_names = df_quests.iloc[1]
             quest_xps = df_quests.iloc[4]
 
@@ -189,22 +190,28 @@ try:
                 cnt = 0
                 found_any = False
 
+                # Quests starten ab Spalte D (Index 3), in Paarung Status | XP
                 start_col = 3
 
                 for c in range(start_col, df_quests.shape[1], 2):
                     try:
+                        # Quest-Name in Zeile 2, Spalte c
                         q_name = str(quest_names.iloc[c]).strip()
-                        if not q_name or q_name.lower() == "nan":
+                        
+                        # ROBUST: Leerzeilen/Unnamed Spalten überspringen
+                        if not q_name or q_name.lower() == "nan" or "unnamed" in q_name.lower():
                             continue
 
                         q_check = q_name.lower()
                         if "summe" in q_check or "game" in q_check or "over" in q_check:
                             continue
 
-                        val = str(student_quest_row.iloc[c])
+                        # Status in Schüler-Zeile, Spalte c
+                        val = str(student_quest_row.iloc[c]) if c < len(student_quest_row) else ""
 
                         is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
 
+                        # XP in Zeile 5, Spalte c (gleiche Spalte wie Quest-Name)
                         try:
                             xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
                         except:
