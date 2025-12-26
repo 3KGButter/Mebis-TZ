@@ -144,7 +144,9 @@ try:
             xp_num = best_match["xp"]
             
             # Anzeige
-            st.balloons()
+            if not best_match["is_game_over"]:
+                st.balloons()
+            
             # HIER KEIN KLARNAME MEHR, NUR GAMERTAG
             st.success(f"Willkommen zurück, **{gamertag_input}**!") 
             
@@ -227,7 +229,17 @@ try:
                         continue
                 
                 if not found_quests_any:
-                    tab1.info("Noch keine Quests abgeschlossen.")
+                    # HIER IST DIE ÄNDERUNG: TOTENKOPF BEI GAME OVER
+                    if best_match["is_game_over"]:
+                        tab1.markdown("""
+                        <div style="text-align: center; margin-top: 20px;">
+                            <h1 style="font-size: 80px;">💀</h1>
+                            <h2 style="color: red; font-weight: bold;">GAME OVER</h2>
+                            <p style="font-size: 18px;">Keine Quests abgeschlossen.</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        tab1.info("Noch keine Quests abgeschlossen. Leg los!")
             else:
                 st.warning("Quest-Daten konnten nicht synchronisiert werden.")
 
