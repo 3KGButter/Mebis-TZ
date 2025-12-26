@@ -3,8 +3,8 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # --- SEITE KONFIGURIEREN ---
-st.set_page_config(page_title="TZ Questlog", page_icon="📐")
-st.title("📐 Technisches Zeichnen - Questlog")
+st.set_page_config(page_title="Questlog", page_icon="📐")
+st.title("Questlog")
 
 # --- LEVEL KONFIGURATION ---
 LEVEL_THRESHOLDS = {
@@ -44,7 +44,7 @@ try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # WICHTIG: ttl=0 zwingt die App, die Daten SOFORT neu zu laden (kein Cache!)
+        # ttl=0 für Live-Daten (kein Cache)
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
         df_xp.columns = df_xp.columns.str.strip()
     except Exception as e:
@@ -55,13 +55,15 @@ try:
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
 
     if gamertag_input:
-        # --- PHASE 1: IDENTITÄT FINDEN (LINKER BEREICH) ---
+        # --- PHASE 1: IDENTITÄT FINDEN (LINKER BEREICH - STAMMDATEN) ---
+        # Wir suchen den Namen NUR im linken Bereich (Index < 11), um den echten Namen sicher zu haben.
         real_name_found = None
         left_gamertag_col = None
         name_col = None
         
         for c in df_xp.columns:
             col_idx = df_xp.columns.get_loc(c)
+            # Spalten A-K sind Index 0-10
             if "Gamertag" in str(c) and col_idx < 11:
                 left_gamertag_col = c
             if "Klasse + Name" in str(c) and col_idx < 11:
@@ -77,20 +79,40 @@ try:
             st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten gefunden.")
             st.stop()
 
-        # --- PHASE 2: STATS FINDEN (RECHTER BEREICH) ---
-        best_stats = None
-        gamertag_cols_right = [c for c in df_xp.columns if "Gamertag" in str(c) and df_xp.columns.get_loc(c) >= 11]
+        # --- PHASE 2: STATS & RANG FINDEN (KLASSEN-TABELLEN AB SPALTE Y) ---
+        # Spalte Y ist der 25. Buchstabe -> Index 24 (A=0).
+        # Wir suchen den Gamertag NUR in Spalten mit Index >= 24.
         
-        for g_col in gamertag_cols_right:
+        best_stats = None
+        
+        # Alle Spalten durchgehen, die "Gamertag" heißen
+        gamertag_cols_class = [c for c in df_xp.columns if "Gamertag" in str(c)]
+        
+        for g_col in gamertag_cols_class:
             col_idx = df_xp.columns.get_loc(g_col)
+            
+            # FILTER: Nur Spalten ab Index 24 (Spalte Y) zulassen!
+            # Damit ignorieren wir die Gesamt-Rangliste (Spalte M) und die Rohdaten (Spalte E).
+            if col_idx < 24:
+                continue
             
             for idx, row in df_xp.iterrows():
                 val = str(row.iloc[col_idx]).strip()
                 
                 if val.lower() == gamertag_input.strip().lower():
                     try:
+                        # Struktur in den Klassen-Tabellen:
+                        # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
+                        
                         raw_xp = row.iloc[col_idx + 1]
                         raw_level = row.iloc[col_idx + 2]
+                        
+                        # Rang aus der Spalte links daneben holen
+                        raw_rang = "?"
+                        if col_idx > 0:
+                            raw_rang = row.iloc[col_idx - 1]
+                        
+                        # Game Over Status (oft in Stufe oder Level vermerkt)
                         raw_stufe = ""
                         if len(row) > col_idx + 3:
                              raw_stufe = str(row.iloc[col_idx + 3])
@@ -108,34 +130,44 @@ try:
                     match_data = {
                         "xp": current_xp,
                         "raw_level": raw_level,
+                        "raw_rang": raw_rang,
                         "is_game_over": is_game_over
                     }
                     
-                    # Logik: Wir wollen den aktuellsten Status.
-                    # Wenn irgendwo "Game Over" steht, ist das meist wichtig.
-                    # Aber wenn es mehrere Einträge gibt, nehmen wir sicherheitshalber den Eintrag aus der Klassenliste (oft weiter rechts).
-                    # Einfache Regel hier: Wir überschreiben einfach, wenn wir was finden.
-                    # Da die "Gesamtliste" meist am Ende kommt, gewinnt diese.
-                    best_stats = match_data
+                    # Falls der Schüler in mehreren Klassenlisten auftauchen sollte (unwahrscheinlich),
+                    # nehmen wir den Eintrag mit den meisten Punkten (oder einfach den ersten gefundenen).
+                    if best_stats is None or match_data["xp"] > best_stats["xp"]:
+                        best_stats = match_data
 
         if best_stats:
+            # --- WERTE FORMATIEREN ---
             raw_lvl = best_stats["raw_level"]
             display_level = str(raw_lvl)
             try:
+                # Macht aus "9.0" eine "9"
                 display_level = str(int(float(raw_lvl)))
             except:
                 pass 
 
             xp_num = best_stats["xp"]
             
+            # Rang formatieren
+            display_rang = str(best_stats["raw_rang"])
+            try:
+                display_rang = f"#{int(float(display_rang))}"
+            except:
+                pass 
+
+            # --- ANZEIGE ---
             if not best_stats["is_game_over"]:
                 st.balloons()
             
             st.success(f"Willkommen zurück, **{gamertag_input}**!") 
             
-            col1, col2 = st.columns(2)
-            col1.metric("Level", display_level)
-            col2.metric("XP Total", xp_num)
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Klassen-Rang", display_rang)
+            col2.metric("Level", display_level)
+            col3.metric("XP Total", xp_num)
             
             if not best_stats["is_game_over"]:
                 prog_val, prog_text = calculate_progress(xp_num)
@@ -145,7 +177,6 @@ try:
 
             # --- QUESTS LADEN ---
             try:
-                # Auch hier ttl=0 für frische Quest-Daten
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Konnte Quests nicht laden.")
@@ -222,9 +253,10 @@ try:
                 st.warning(f"Konnte Quest-Log für '{real_name_found}' nicht synchronisieren.")
 
         else:
-            st.error(f"Gamertag '{gamertag_input}' in Rangliste noch nicht aktiv.")
+            st.error(f"Gamertag '{gamertag_input}' in der Klassen-Rangliste nicht gefunden.")
 
 except Exception as e:
     st.error("Ein technischer Fehler ist aufgetreten. Bitte lade die Seite neu.")
+
 
 
