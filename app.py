@@ -128,21 +128,12 @@ if gamertag_input:
         # --- QUESTS LADEN ---
         try:
             df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
-            st.write("✅ Questbuch geladen")
         except Exception as e:
-            st.error(f"❌ Fehler beim Laden von Questbuch: {e}")
+            st.error(f"Fehler beim Laden von '{blatt_quests}': {e}")
             st.stop()
 
-        st.write("---")
-        st.write(f"📊 **Questbuch Shape**: {df_quests.shape[0]} Zeilen × {df_quests.shape[1]} Spalten")
-        st.write(f"📋 **Zeile 2 (Index 1) - Quest-Namen (erste 15 Spalten)**:")
-        st.write(list(df_quests.iloc[1, 0:15]))
-        st.write(f"💎 **Zeile 5 (Index 4) - XP-Werte (erste 15 Spalten)**:")
-        st.write(list(df_quests.iloc[4, 0:15]))
-        st.write("---")
-
-        quest_names = df_quests.iloc[1]
-        quest_xps = df_quests.iloc[4]
+        quest_names = df_quests.iloc[1]  # Zeile 2: Questnamen
+        quest_xps = df_quests.iloc[4]    # Zeile 5: XP-Werte
 
         # --- SCHÜLERZEILE SUCHEN ---
         q_idx = -1
@@ -150,9 +141,6 @@ if gamertag_input:
         search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 1]
         if not search_tokens:
             search_tokens = [search_name_clean]
-
-        st.write(f"🔍 **Suche nach Schüler**: '{real_name_found}' (clean: '{search_name_clean}')")
-        st.write(f"🔑 **Tokens**: {search_tokens}")
 
         for idx in range(6, len(df_quests)):  # Schülerdaten ab Zeile 7 (Index 6)
             row = df_quests.iloc[idx]
@@ -164,22 +152,13 @@ if gamertag_input:
                     break
             if match_all:
                 q_idx = idx
-                st.write(f"✅ **Schüler gefunden in Zeile {idx}**: {row.iloc[0:3].tolist()}")
                 break
 
         if q_idx == -1:
-            st.error(f"❌ Schüler '{real_name_found}' nicht gefunden!")
-            st.write("📋 **Erste 15 Namen im Questbuch:**")
-            for i in range(6, min(21, len(df_quests))):
-                st.write(f"Zeile {i}: {df_quests.iloc[i, 0:3].tolist()}")
+            st.error(f"Konnte Quests für '{real_name_found}' nicht laden.")
+            st.caption(f"Name aus XP-Tabelle: {real_name_found}")
         else:
             student_quest_row = df_quests.iloc[q_idx]
-
-            st.write(f"📍 **Schüler-Zeile**: {q_idx}")
-            st.write(f"👤 **Name**: {student_quest_row.iloc[0]}")
-            st.write(f"✉️  **Email**: {student_quest_row.iloc[1]}")
-            st.write(f"🏫 **Klasse/Gesamt**: {student_quest_row.iloc[2]}")
-            st.write("---")
 
             st.divider()
 
@@ -195,10 +174,8 @@ if gamertag_input:
             cols = st.columns(3)
             cnt = 0
             found_any = False
-            quest_count = 0
 
-            # WICHTIG: Quests liegen in den GERADEN Spalten ab Index 2 (C),
-            # also 2,4,6,8,... (Grundregeln, Linienarten, Feedback, ...)
+            # Quests liegen in den GERADEN Spalten ab Index 2 (C): 2,4,6,8,...
             start_col = 2
 
             for c in range(start_col, df_quests.shape[1], 2):
@@ -211,8 +188,6 @@ if gamertag_input:
                     if "summe" in q_check or "game" in q_check or "over" in q_check:
                         continue
 
-                    quest_count += 1
-
                     val = str(student_quest_row.iloc[c]) if c < len(student_quest_row) else ""
                     is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
 
@@ -220,9 +195,6 @@ if gamertag_input:
                         xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
                     except:
                         xp_val = "?"
-
-                    if quest_count <= 3:
-                        st.write(f"Quest {quest_count}: '{q_name}' | Status: '{val}' | Completed: {is_completed} | XP: {xp_val}")
 
                     if show_done:
                         if is_completed:
@@ -240,11 +212,8 @@ if gamertag_input:
                                 </div>
                                 """, unsafe_allow_html=True)
                             cnt += 1
-                except Exception as e:
-                    st.write(f"❌ Fehler bei Spalte {c}: {str(e)}")
+                except Exception:
                     continue
-
-            st.write(f"📊 **Total Quests gefunden**: {quest_count}")
 
             if not found_any:
                 if show_done:
@@ -261,4 +230,4 @@ if gamertag_input:
                         st.balloons()
                         st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
     else:
-        st.error(f"❌ Gamertag '{gamertag_input}' nicht gefunden.")
+        st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
