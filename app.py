@@ -66,7 +66,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v5.3 - Short Row Fix")
+    st.caption("v5.4 - Final Fix")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -186,36 +186,35 @@ try:
                 found_any = False
                 processed_cols = set()
 
-                # --- WICHTIGSTE ÄNDERUNG ---
-                # Wir nehmen IMMER die Länge der Header-Zeile als Limit.
-                # Wenn die Schülerzeile kürzer ist, fangen wir das mit try/except ab.
-                max_cols = len(header_row)
+                # --- SCHLÜSSEL-ÄNDERUNG ---
+                # Wir gehen ALLE Header-Spalten durch, egal wie kurz die Schülerzeile ist.
+                max_header_cols = len(header_row)
                 
-                for c in range(3, max_cols):
+                for c in range(3, max_header_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     
+                    # Strenge Filterung: Ist das wirklich ein Questname?
                     if q_name == "nan" or not q_name.strip(): continue
-                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold"]): continue
+                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "gold"]): continue
                     
+                    # XP Wert bestimmen (Standard ist 0)
                     xp_val = 0
                     
-                    # Wir versuchen sicher, XP zu lesen.
-                    # Wenn der Index beim Schüler nicht existiert (Zeile zu kurz), ist XP = 0.
-                    
-                    # Versuch 1: Rechte Spalte (Standard)
+                    # Wir schauen SICHER in Spalte c+1 (Rechts)
                     try:
+                        # Prüfen, ob der Index beim Schüler überhaupt existiert
                         if c + 1 < len(student_row):
                             val_right = clean_number(student_row.iloc[c+1])
+                            # XP muss > 0 sein und < 5000 (Plausibilitätscheck gegen Fehler)
                             if val_right > 0:
                                 xp_val = val_right
                                 processed_cols.add(c+1)
-                        # Wenn c+1 schon out of bounds ist, passiert nichts -> XP bleibt 0
                     except:
-                        pass
+                        pass # Wenn Index Error -> XP bleibt 0
                     
-                    # Versuch 2: Gleiche Spalte (Fallback)
+                    # Fallback: Gleiche Spalte (c)
                     if xp_val == 0:
                         try:
                             if c < len(student_row):
@@ -248,7 +247,7 @@ try:
                     if show_done:
                         st.info("Noch keine Quests erledigt.")
                     else:
-                        st.info("Keine offenen Quests mehr!")
+                        st.success("Keine offenen Quests mehr!")
 
             else:
                 st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
