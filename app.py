@@ -133,7 +133,6 @@ if gamertag_input:
             st.error(f"❌ Fehler beim Laden von Questbuch: {e}")
             st.stop()
 
-        # DEBUG INFO 1: Shape und erste Zeilen
         st.write("---")
         st.write(f"📊 **Questbuch Shape**: {df_quests.shape[0]} Zeilen × {df_quests.shape[1]} Spalten")
         st.write(f"📋 **Zeile 2 (Index 1) - Quest-Namen (erste 15 Spalten)**:")
@@ -198,7 +197,9 @@ if gamertag_input:
             found_any = False
             quest_count = 0
 
-            start_col = 3  # Spalte D
+            # WICHTIG: Quests liegen in den GERADEN Spalten ab Index 2 (C),
+            # also 2,4,6,8,... (Grundregeln, Linienarten, Feedback, ...)
+            start_col = 2
 
             for c in range(start_col, df_quests.shape[1], 2):
                 try:
@@ -220,7 +221,6 @@ if gamertag_input:
                     except:
                         xp_val = "?"
 
-                    # DEBUG für erste 3 Quests
                     if quest_count <= 3:
                         st.write(f"Quest {quest_count}: '{q_name}' | Status: '{val}' | Completed: {is_completed} | XP: {xp_val}")
 
