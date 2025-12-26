@@ -144,9 +144,17 @@ try:
             # --- SCHRITT 3: QUESTS LADEN ---
             try:
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
-            except:
-                st.warning("Quest-Daten nicht verfügbar.")
+            except Exception as e:
+                st.warning(f"Quest-Daten nicht verfügbar: {e}")
                 st.stop()
+
+            # DEBUG: Zeige erste paar Zeilen und Spalten
+            with st.expander("🐛 DEBUG: Questbuch Struktur"):
+                st.write(f"**Gesamte Shape**: {df_quests.shape}")
+                st.write(f"**Zeile 2 (Quest-Namen, erste 10)**: {list(df_quests.iloc[1, :10])}")
+                st.write(f"**Zeile 5 (XP-Werte, erste 10)**: {list(df_quests.iloc[4, :10])}")
+                st.write(f"**Schüler Namen (erste 20 Zeilen, erste 4 Spalten)**:")
+                st.dataframe(df_quests.iloc[6:26, 0:4])
 
             # Questnamen in Zeile 2 (Index 1), XP in Zeile 5 (Index 4)
             quest_names = df_quests.iloc[1]
@@ -174,8 +182,14 @@ try:
                     q_idx = idx
                     break
 
+            st.write(f"**DEBUG: Suche nach**: {search_name_clean} | Tokens: {search_tokens}")
+            st.write(f"**DEBUG: Gefundene Zeile**: {q_idx}")
+
             if q_idx != -1:
                 student_quest_row = df_quests.iloc[q_idx]
+                st.write(f"**DEBUG: Schüler gefunden - Zeile {q_idx}**: {student_quest_row.iloc[0:3].tolist()}")
+                st.write(f"**DEBUG: Status Spalte 3 (Index 3)**: {student_quest_row.iloc[3]}")
+                st.write(f"**DEBUG: Status Spalte 5 (Index 5)**: {student_quest_row.iloc[5]}")
 
                 st.divider()
 
@@ -213,7 +227,7 @@ try:
 
                         is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
 
-                        # XP in Zeile 5 (Index 4), Spalte c (gleiche Spalte wie Quest-Name)
+                        # XP in Zeile 5 (Index 4), Spalte c
                         try:
                             xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
                         except:
@@ -236,6 +250,7 @@ try:
                                     """, unsafe_allow_html=True)
                                 cnt += 1
                     except Exception as e:
+                        st.write(f"DEBUG Error bei Spalte {c}: {str(e)}")
                         continue
 
                 if not found_any:
@@ -256,11 +271,15 @@ try:
             else:
                 st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
                 st.caption(f"Name aus XP-Tabelle: {real_name_found}")
-                st.write(f"DEBUG: Suchname: {search_name_clean}")
-                st.write(f"DEBUG: Tokens: {search_tokens}")
+                st.write(f"**DEBUG: Suchname**: {search_name_clean}")
+                st.write(f"**DEBUG: Tokens**: {search_tokens}")
+                st.write(f"**DEBUG: Erste 20 Namen im Questbuch (Spalten 0-3, Zeilen 6-25)**:")
+                st.dataframe(df_quests.iloc[6:26, 0:4])
 
         else:
             st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
 
 except Exception as e:
     st.error(f"Ein Fehler ist aufgetreten: {str(e)}")
+    import traceback
+    st.write(traceback.format_exc())
