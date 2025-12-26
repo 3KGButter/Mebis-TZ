@@ -189,4 +189,4 @@ try:
 
 except Exception as e:
     st.error("Ein kritischer Fehler ist aufgetreten:")
-    st.code(str(e))
+    st.code(str(e)
