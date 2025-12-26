@@ -53,7 +53,8 @@ try:
     try:
         # ttl=0 holt immer frische Daten
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
-        df_xp.columns = df_xp.columns.str.strip()
+        # Wir entfernen KEINE Leerzeichen aus den Spaltennamen im DataFrame selbst,
+        # um die Indizes nicht durcheinanderzubringen, prüfen aber beim String-Vergleich
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
         st.stop()
@@ -62,92 +63,90 @@ try:
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
 
     if gamertag_input:
-        # --- PHASE 1: IDENTITÄT FINDEN (LINKER BEREICH < SPALTE L) ---
+        # --- PHASE 1: ECHTEN NAMEN FINDEN (LINKS < SPALTE 11) ---
         real_name_found = None
-        left_gamertag_col = None
-        name_col = None
         
-        # Wir suchen Spalten in den ersten 11 Indizes (A-K)
-        for c in df_xp.columns:
-            col_idx = df_xp.columns.get_loc(c)
-            if "Gamertag" in str(c) and col_idx < 11:
-                left_gamertag_col = c
-            if "Klasse + Name" in str(c) and col_idx < 11:
-                name_col = c
+        # Wir suchen in den ersten 11 Spalten (Index 0 bis 10)
+        # nach der Spalte "Gamertag" und der Spalte "Klasse + Name"
+        col_idx_gamertag_left = -1
+        col_idx_name_left = -1
         
-        if left_gamertag_col and name_col:
+        for i in range(min(11, len(df_xp.columns))):
+            col_name = str(df_xp.columns[i]).strip()
+            if "Gamertag" in col_name:
+                col_idx_gamertag_left = i
+            if "Klasse + Name" in col_name:
+                col_idx_name_left = i
+                
+        if col_idx_gamertag_left != -1 and col_idx_name_left != -1:
             for idx, row in df_xp.iterrows():
-                if str(row[left_gamertag_col]).strip().lower() == gamertag_input.strip().lower():
-                    real_name_found = row[name_col]
+                val = str(row.iloc[col_idx_gamertag_left]).strip()
+                if val.lower() == gamertag_input.strip().lower():
+                    real_name_found = row.iloc[col_idx_name_left]
                     break
         
         if not real_name_found:
             st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten gefunden.")
             st.stop()
 
-        # --- PHASE 2: STATS FINDEN (RECHTER BEREICH >= SPALTE Y) ---
-        # Wir suchen ab Spalte Y (Index 24).
-        # Spalte Y bis AD (11T1), AF bis AK (11T2), AM bis AR (11T3), AT bis AY (11T4)
-        # Index Y = 24.
+        # --- PHASE 2: STATS FINDEN (RECHTS AB SPALTE 24 / Y) ---
         best_stats = None
         
-        # Alle Spalten durchsuchen, die "Gamertag" heißen UND ab Index 24 (Spalte Y) liegen
-        gamertag_cols_right = [c for c in df_xp.columns if "Gamertag" in str(c) and df_xp.columns.get_loc(c) >= 24]
-        
-        for g_col in gamertag_cols_right:
-            col_idx = df_xp.columns.get_loc(g_col)
+        # Wir iterieren über ALLE Spalten ab Index 24
+        for col_idx in range(24, len(df_xp.columns)):
+            col_header = str(df_xp.columns[col_idx]).strip()
             
-            for idx, row in df_xp.iterrows():
-                val = str(row.iloc[col_idx]).strip()
+            # Ist das eine Gamertag-Spalte?
+            if "Gamertag" in col_header:
                 
-                if val.lower() == gamertag_input.strip().lower():
-                    try:
-                        # Struktur in den Klassen-Tabellen (Spalte Y ff.):
-                        # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
-                        
-                        raw_xp = row.iloc[col_idx + 1]
-                        raw_level = row.iloc[col_idx + 2]
-                        
-                        # Rang suchen: In den Klassentabellen steht der Rang LINKS (-1) vom Gamertag
-                        raw_rang = "?"
-                        if col_idx > 0:
-                            val_left = str(row.iloc[col_idx - 1]).strip()
-                            # Prüfen ob da eine Zahl steht (der Rang)
-                            if val_left.replace('.','',1).isdigit():
-                                raw_rang = val_left
-                        
-                        # Game Over Check (Suche in Level und Stufe)
-                        raw_stufe = ""
-                        if len(row) > col_idx + 3:
-                             raw_stufe = str(row.iloc[col_idx + 3])
-                    except:
-                        continue 
+                # Jetz suchen wir IN dieser Spalte nach dem User
+                for idx, row in df_xp.iterrows():
+                    val = str(row.iloc[col_idx]).strip()
                     
-                    check_string = f"{raw_level} {raw_stufe}".lower()
-                    is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
-                    
-                    try:
-                        current_xp = int(raw_xp)
-                    except:
-                        current_xp = 0
+                    if val.lower() == gamertag_input.strip().lower():
+                        # TREFFER in einer Klassen-Liste!
+                        try:
+                            # Struktur Klassenliste:
+                            # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
+                            
+                            raw_xp = row.iloc[col_idx + 1]
+                            raw_level = row.iloc[col_idx + 2]
+                            
+                            # Rang steht links daneben
+                            raw_rang = row.iloc[col_idx - 1]
+                            
+                            # Stufe (Game Over Info) steht rechts
+                            raw_stufe = ""
+                            if len(row) > col_idx + 3:
+                                raw_stufe = str(row.iloc[col_idx + 3])
+                                
+                        except:
+                            continue # Spalte außerhalb, weitersuchen
+                        
+                        # Game Over Check
+                        check_string = f"{raw_level} {raw_stufe}".lower()
+                        is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
+                        
+                        try:
+                            current_xp = int(raw_xp)
+                        except:
+                            current_xp = 0
 
-                    match_data = {
-                        "xp": current_xp,
-                        "raw_level": raw_level,
-                        "raw_rang": raw_rang,
-                        "is_game_over": is_game_over
-                    }
-                    
-                    # LOGIK: Wir nehmen den besten Eintrag.
-                    if best_stats is None:
-                        best_stats = match_data
-                    else:
-                        # Wenn der neue Fund mehr XP hat, nimm ihn
-                        if match_data["xp"] > best_stats["xp"]:
+                        match_data = {
+                            "xp": current_xp,
+                            "raw_level": raw_level,
+                            "raw_rang": raw_rang,
+                            "is_game_over": is_game_over
+                        }
+                        
+                        # Logik: Besten Treffer speichern
+                        if best_stats is None:
                             best_stats = match_data
-                        # Wenn beide 0 XP haben, aber einer Game Over ist, nimm den Game Over
-                        elif match_data["xp"] == 0 and match_data["is_game_over"]:
-                            best_stats = match_data
+                        else:
+                            if match_data["xp"] > best_stats["xp"]:
+                                best_stats = match_data
+                            elif match_data["xp"] == 0 and match_data["is_game_over"]:
+                                best_stats = match_data
 
         if best_stats:
             # Werte formatieren
@@ -160,7 +159,7 @@ try:
 
             xp_num = best_stats["xp"]
             
-            # Rang
+            # Rang formatieren
             display_rang = str(best_stats["raw_rang"])
             if display_rang.replace('.','',1).isdigit():
                  display_rang = f"#{int(float(display_rang))}"
