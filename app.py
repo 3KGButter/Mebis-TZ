@@ -37,7 +37,7 @@ def calculate_progress(current_xp):
 def clean_number(val):
     """
     Macht aus '4349.0' -> 4349.
-    Ignoriert Text und leere Zellen.
+    Gibt 0 zurück, wenn leer oder Text.
     """
     if pd.isna(val) or str(val).strip() == "":
         return 0
@@ -46,11 +46,7 @@ def clean_number(val):
         return int(val)
         
     s = str(val).strip()
-    
-    if s.endswith(".0"):
-        s = s[:-2]
-    
-    # Entferne Tausenderpunkte, ersetze Komma
+    if s.endswith(".0"): s = s[:-2]
     s = s.replace('.', '').replace(',', '.')
     
     try:
@@ -58,7 +54,7 @@ def clean_number(val):
     except:
         return 0
 
-# --- DATENBANK ---
+# --- VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
 blatt_xp = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
@@ -67,16 +63,15 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v6.0 - Strict Text Logic")
+    st.caption("v7.0 - Hybrid Check")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ----------------------------------------------------------------
-    # 1. LOGIN & LEVEL (XP Rechner 3.0)
+    # 1. LOGIN & XP
     # ----------------------------------------------------------------
     try:
-        # header=1: Zeile 2 sind Überschriften
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_xp, header=1, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_xp}': {e}")
@@ -105,10 +100,9 @@ try:
                     found_idx = matches[0]
                     row = df_xp.iloc[found_idx]
                     
-                    # XP und Level stehen rechts daneben
-                    if col_i + 2 < len(df_xp.columns):
+                    if col_i + 1 < len(df_xp.columns):
                         raw_xp = row.iloc[col_i + 1]
-                        raw_lvl = row.iloc[col_i + 2]
+                        raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
                         
                         raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
                         is_go = "†" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
@@ -122,7 +116,6 @@ try:
         
         if stats and found_idx != -1:
             try:
-                # Name aus Spalte D (Index 3) der gleichen Zeile
                 real_name = str(df_xp.iloc[found_idx, 3])
             except:
                 real_name = "Unbekannt"
@@ -147,31 +140,27 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Neue "Master-Row" Logik)
+            # 2. QUESTBUCH (Hybrid-Logik)
             # ----------------------------------------------------------------
             try:
-                # header=None -> Index-Zugriff
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
 
-            # --- DEFINITIONEN ---
-            # Zeile 2 (Index 1): Quest-Namen
+            # --- HEADER INFOS ---
+            # Zeile 2 (Index 1): Questnamen
             header_row = df_q.iloc[1]
-            
-            # Zeile 5 (Index 4): Master XP Werte (Belohnung für die Quest)
+            # Zeile 5 (Index 4): Master XP Werte (Soll-Werte)
             master_xp_row = df_q.iloc[4]
             
-            # --- SCHÜLERSUCHE ---
+            # --- SCHÜLER SUCHE ---
             q_row_idx = -1
             search_str = real_name.lower()
-            # Bereinigung des Namens
             for k in ["11t1", "11t2", "11t3", "11t4"]: search_str = search_str.replace(k.lower(), "")
             parts = [p for p in search_str.split() if len(p) > 2]
             if not parts: parts = [search_str]
             
-            # Suche ab Zeile 5 (Datenbereich)
             for i in range(4, len(df_q)):
                 r = df_q.iloc[i]
                 txt = f"{r.iloc[0]} {r.iloc[1]}".lower()
@@ -196,57 +185,70 @@ try:
                 found_any = False
                 processed_cols = set()
 
-                # Wir laufen IMMER bis zum Ende der Header-Zeile
-                # (Löst das Problem bei BrAnt mit den abgeschnittenen Zeilen)
                 max_cols = len(header_row)
                 
                 for c in range(3, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
-                    
-                    # Überspringe leere Header oder Metadaten
                     if q_name == "nan" or not q_name.strip(): continue
-                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold"]): continue
+                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "gold"]): continue
                     
-                    # Wir haben eine Quest gefunden! Spalte 'c' ist der Anker.
+                    # --- DATEN SAMMELN ---
                     
-                    # 1. STATUS PRÜFEN (Beim Schüler)
-                    # Wir schauen sicher in die Zelle. Wenn Index Error -> Leer.
+                    # 1. Master XP (Zeile 5, Spalte rechts neben Name)
+                    master_xp = 0
+                    try:
+                        if c+1 < len(master_xp_row):
+                            master_xp = clean_number(master_xp_row.iloc[c+1])
+                        if master_xp == 0: # Fallback: Gleiche Spalte
+                            master_xp = clean_number(master_xp_row.iloc[c])
+                    except: pass
+
+                    # 2. Schüler Status (Text)
                     status_text = ""
                     try:
                         if c < len(student_row):
                             status_text = str(student_row.iloc[c]).lower()
-                    except:
-                        pass
+                    except: pass
                     
-                    # Die entscheidende Logik: Text ist Gesetz.
-                    is_completed = "abgeschlossen" in status_text and "nicht" not in status_text
-                    
-                    # 2. XP WERT HOLEN (Aus Master-Zeile 5)
-                    # Die XP stehen meist in der Spalte RECHTS daneben (c+1)
-                    # (Siehe: Name in D, XP in E)
-                    xp_val = 0
+                    # 3. Schüler XP (Zahl)
+                    student_xp = 0
                     try:
-                        if c + 1 < len(master_xp_row):
-                            xp_val = clean_number(master_xp_row.iloc[c+1])
-                            if xp_val > 0:
-                                processed_cols.add(c+1) # Spalte c+1 als erledigt markieren
-                    except:
-                        pass
+                        if c+1 < len(student_row):
+                            student_xp = clean_number(student_row.iloc[c+1])
+                    except: pass
                     
-                    # Fallback: Vielleicht stehen XP in der gleichen Spalte (c)?
-                    if xp_val == 0:
-                        try:
-                            xp_val = clean_number(master_xp_row.iloc[c])
-                        except: pass
+                    # --- ENTSCHEIDUNGSLOGIK ---
                     
-                    # ANZEIGE
+                    is_completed = False
+                    final_xp = 0
+                    
+                    # Bedingung A: Text sagt "abgeschlossen" (auch wenn XP 0 sind!)
+                    if "abgeschlossen" in status_text and "nicht" not in status_text:
+                        is_completed = True
+                        # Wenn Schüler 0 XP eingetragen hat, nimm Master XP
+                        final_xp = student_xp if student_xp > 0 else master_xp
+                        
+                    # Bedingung B: Schüler hat Punkte eingetragen (>0)
+                    elif student_xp > 0:
+                        is_completed = True
+                        final_xp = student_xp
+                        
+                    # Wenn noch nicht fertig, zeigen wir Master XP als "Möglichkeit" an
+                    if not is_completed:
+                        final_xp = master_xp
+                        
+                    # Damit wir Spalte c+1 nicht nochmal als Quest lesen
+                    if c+1 < max_cols:
+                        processed_cols.add(c+1)
+
+                    # --- ANZEIGE ---
                     if show_done:
                         if is_completed:
                             found_any = True
                             with cols[cnt % 3]:
-                                st.success(f"**{q_name}**\n\n+{xp_val} XP")
+                                st.success(f"**{q_name}**\n\n+{final_xp} XP")
                             cnt += 1
                     else:
                         if not is_completed:
@@ -254,7 +256,7 @@ try:
                             with cols[cnt % 3]:
                                 st.markdown(f"""
                                 <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
-                                    <strong>{q_name}</strong><br>🔒 {xp_val} XP
+                                    <strong>{q_name}</strong><br>🔒 {final_xp} XP
                                 </div>
                                 """, unsafe_allow_html=True)
                             cnt += 1
@@ -263,7 +265,7 @@ try:
                     if show_done:
                         st.info("Noch keine Quests erledigt.")
                     else:
-                        st.success("Keine offenen Quests mehr! Super!")
+                        st.success("Keine offenen Quests mehr!")
 
             else:
                 st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
