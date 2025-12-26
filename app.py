@@ -64,66 +64,36 @@ try:
     if gamertag_input:
         input_clean = gamertag_input.strip().lower()
         
-        # --- SCHRITT 1: ECHTEN NAMEN FINDEN (Links, Spalte 0-10) ---
-        # Nur für interne Quest-Suche nötig (um im Questbuch den Namen zu matchen)
-        real_name_found = None
-        
-        col_idx_gamertag_left = -1
-        col_idx_name_left = -1
-        
-        for i in range(min(11, len(df_xp.columns))):
-            col_name = str(df_xp.columns[i]).strip()
-            if "Gamertag" in col_name:
-                col_idx_gamertag_left = i
-            if "Klasse + Name" in col_name:
-                col_idx_name_left = i
-        
-        if col_idx_gamertag_left != -1 and col_idx_name_left != -1:
-            for idx, row in df_xp.iterrows():
-                val = str(row.iloc[col_idx_gamertag_left]).strip()
-                if val.lower() == input_clean:
-                    real_name_found = row.iloc[col_idx_name_left]
-                    break
-        
-        if not real_name_found:
-            st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
-            st.stop()
-
-        # --- SCHRITT 2: XP & LEVEL FINDEN (NUR SPALTE L bis P / Index 11-15) ---
-        # Wir beschränken uns strikt auf die Gesamt-Rangliste in der Mitte.
+        # --- SCHRITT 1: GAMERTAG SUCHEN (NUR BEREICH L bis P) ---
+        found_row_index = -1
         best_stats = None
         
-        # Bereich definieren: Spalte L (11) bis P (15) -> range(11, 16)
-        # Wir suchen darin die Spalte, die "Gamertag" heißt (meist M/12)
-        target_range_start = 11
-        target_range_end = min(17, len(df_xp.columns)) # P/Q als Sicherheit
+        # Bereich: L (Index 11) bis P (Index 15)
+        # Wir suchen die Spalte "Gamertag" in diesem Bereich
+        target_col_start = 11 
+        target_col_end = min(17, len(df_xp.columns))
         
-        for col_idx in range(target_range_start, target_range_end):
+        for col_idx in range(target_col_start, target_col_end):
             col_header = str(df_xp.columns[col_idx]).strip()
             
-            # Ist das eine Gamertag-Spalte?
             if "Gamertag" in col_header:
+                # Spalte gefunden! Jetzt suchen wir den User.
                 col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
                 matches = col_data[col_data == input_clean].index
                 
-                for row_idx in matches:
-                    try:
-                        row = df_xp.iloc[row_idx]
+                if not matches.empty:
+                    # Treffer! Wir nehmen den ersten (sollte eindeutig sein)
+                    found_row_index = matches[0]
+                    
+                    # Daten aus dieser Zeile lesen
+                    row = df_xp.iloc[found_row_index]
+                    
+                    # Annahme: XP ist +1 (rechts), Level ist +2 (rechts)
+                    if col_idx + 2 < len(df_xp.columns):
+                        raw_xp = row.iloc[col_idx + 1]
+                        raw_level = row.iloc[col_idx + 2]
                         
-                        # Struktur in Gesamtliste (L-P):
-                        # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
-                        
-                        # XP (+1)
-                        if col_idx + 1 < len(df_xp.columns):
-                            raw_xp = row.iloc[col_idx + 1]
-                        else: continue
-                            
-                        # Level (+2)
-                        if col_idx + 2 < len(df_xp.columns):
-                            raw_level = row.iloc[col_idx + 2]
-                        else: continue
-                        
-                        # Stufe (+3) für Game Over
+                        # Game Over Check (Stufe ist meist +3)
                         raw_stufe = ""
                         if col_idx + 3 < len(df_xp.columns):
                             raw_stufe = str(row.iloc[col_idx + 3])
@@ -136,25 +106,23 @@ try:
                         except:
                             xp_val = 0
                             
-                        stats = {
+                        best_stats = {
                             "xp": xp_val,
                             "level": raw_level,
                             "is_game_over": is_game_over
                         }
-                        
-                        # Da wir nur in der EINEN "Gesamt-Rangliste" suchen, 
-                        # ist der erste Treffer meist der richtige. 
-                        # Wir nehmen ihn und brechen ab.
-                        best_stats = stats
-                        break 
-                        
-                    except:
-                        continue
-                
-                if best_stats:
-                    break # Gamertag gefunden, Suche beenden
+                    break # Wir haben den Gamertag gefunden, Abbruch
 
-        if best_stats:
+        if best_stats and found_row_index != -1:
+            # --- SCHRITT 2: ECHTEN NAMEN HOLEN (SPALTE D / INDEX 3) ---
+            # Wir nehmen die exakt gleiche Zeile (found_row_index)
+            try:
+                # Spalte D ist Index 3 (A=0, B=1, C=2, D=3)
+                real_name_found = str(df_xp.iloc[found_row_index, 3])
+            except:
+                real_name_found = "Unbekannt"
+
+            # --- ANZEIGE ---
             display_level = str(best_stats["level"])
             try:
                 display_level = str(int(float(display_level)))
@@ -164,7 +132,6 @@ try:
             xp_num = best_stats["xp"]
             is_go = best_stats["is_game_over"]
 
-            # --- ANZEIGE ---
             if not is_go:
                 st.balloons()
             
@@ -180,7 +147,7 @@ try:
             else:
                 st.error("💀 GAME OVER - Bitte beim Lehrer melden!")
 
-            # --- QUESTS ---
+            # --- SCHRITT 3: QUESTS LADEN ---
             try:
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
@@ -190,12 +157,25 @@ try:
             quest_names = df_quests.iloc[1] 
             quest_xps = df_quests.iloc[4]
 
+            # Wir suchen den Realnamen im Questbuch
             q_idx = -1
-            search_name = str(real_name_found).strip().lower()
+            search_name_clean = real_name_found.strip().lower()
             
+            # Token-Check für Robustheit (Vorname/Nachname Dreher)
+            search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 1]
+            if not search_tokens: search_tokens = [search_name_clean]
+
             for idx, row in df_quests.iterrows():
+                # Wir scannen die ersten 4 Spalten nach dem Namen
                 row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
-                if search_name in row_txt:
+                
+                match_all = True
+                for token in search_tokens:
+                    if token not in row_txt:
+                        match_all = False
+                        break
+                
+                if match_all:
                     q_idx = idx
                     break
             
@@ -204,6 +184,7 @@ try:
                 
                 st.divider()
                 
+                # Toggle Switch UI
                 c_switch, c_text = st.columns([1, 4])
                 with c_switch:
                     show_done = st.toggle("Erledigte anzeigen", value=False)
@@ -270,9 +251,10 @@ try:
 
             else:
                 st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
+                st.caption(f"Name aus XP-Tabelle: {real_name_found}")
 
         else:
-            st.error(f"Für '{gamertag_input}' wurden noch keine XP in der Rangliste (Spalte L-P) gefunden.")
+            st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
 
 except Exception as e:
     st.error("Ein Fehler ist aufgetreten. Bitte Seite neu laden.")
