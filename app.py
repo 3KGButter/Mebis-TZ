@@ -36,24 +36,22 @@ def calculate_progress(current_xp):
 
 def clean_number(val):
     """
-    Macht aus allem sicher eine Zahl.
-    Löst das Problem 4349.0 -> 43490
+    Bereinigt Zahlen robust.
+    Löst das 4349.0 -> 43490 Problem.
     """
     if pd.isna(val) or str(val).strip() == "":
         return 0
     
-    # Wenn es schon eine Zahl ist
     if isinstance(val, (int, float)):
         return int(val)
         
     s = str(val).strip()
     
-    # Entferne ".0" am Ende (Das war der Hauptfehler!)
+    # Entferne ".0" am Ende
     if s.endswith(".0"):
         s = s[:-2]
     
-    # Entferne Tausenderpunkte (Deutsch: 1.000 -> 1000)
-    # Ersetze Komma durch Punkt
+    # Standardisierung: Tausenderpunkte weg, Komma zu Punkt
     s = s.replace('.', '').replace(',', '.')
     
     try:
@@ -70,7 +68,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v5.1 - 'Look Right' Logic")
+    st.caption("v5.2 - Safe Row Access")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -79,7 +77,7 @@ try:
     # 1. LOGIN & XP (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
-        # Wir laden header=1 (Zeile 2), da stehen die Spaltennamen
+        # header=1 (Zeile 2 sind Überschriften)
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_xp, header=1, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_xp}': {e}")
@@ -94,15 +92,13 @@ try:
         found_idx = -1
         stats = None
         
-        # Wir suchen ab Spalte L (Index 11) nach "Gamertag"
-        # Spaltenindizes: L=11, M=12, N=13
+        # Suche ab Spalte L (Index 11)
         start_col = 11
         
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
             
             if "Gamertag" in col_header:
-                # Suche in dieser Spalte
                 col_vals = df_xp.iloc[:, col_i].astype(str).str.strip().str.lower()
                 matches = col_vals[col_vals == user_tag].index
                 
@@ -110,12 +106,10 @@ try:
                     found_idx = matches[0]
                     row = df_xp.iloc[found_idx]
                     
-                    # Spalte rechts daneben (XP)
                     if col_i + 1 < len(df_xp.columns):
                         raw_xp = row.iloc[col_i + 1]
                         raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
                         
-                        # Game Over Check
                         raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
                         is_go = "†" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
                         
@@ -127,13 +121,11 @@ try:
                     break
         
         if stats and found_idx != -1:
-            # Name aus Spalte D (Index 3) holen
             try:
                 real_name = str(df_xp.iloc[found_idx, 3])
             except:
                 real_name = "Unbekannt"
 
-            # Anzeige
             lvl_display = str(stats["level"])
             if "†" in lvl_display: lvl_display = "💀"
             else:
@@ -154,31 +146,26 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Neue Logik)
+            # 2. QUESTBUCH (Verbesserte Logik für offene Quests)
             # ----------------------------------------------------------------
             try:
-                # Header=None -> Wir arbeiten mit Koordinaten
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
 
-            # Header Zeile ist Zeile 2 (Index 1)
+            # Zeile 2 (Index 1) sind die Header
             header_row = df_q.iloc[1]
             
-            # --- SCHÜLERSUCHE ---
+            # Schülersuche
             q_row_idx = -1
-            
-            # Name säubern ("11T1 Antonia..." -> "antonia", "brummer")
             search_str = real_name.lower()
             for k in ["11t1", "11t2", "11t3", "11t4"]: search_str = search_str.replace(k.lower(), "")
             parts = [p for p in search_str.split() if len(p) > 2]
             if not parts: parts = [search_str]
             
-            # Suche ab Zeile 5
             for i in range(4, len(df_q)):
                 r = df_q.iloc[i]
-                # Kombiniere Spalte A & B
                 txt = f"{r.iloc[0]} {r.iloc[1]}".lower()
                 
                 match = True
@@ -199,44 +186,45 @@ try:
                 cols = st.columns(3)
                 cnt = 0
                 found_any = False
-                
-                # --- QUEST ITERATION ---
-                # Wir gehen durch die Header-Spalten ab D (Index 3)
-                # Aber wir nehmen JEDE Spalte, prüfen ob ein Name drin steht.
-                
-                max_cols = min(len(header_row), len(student_row))
-                
-                # Wir merken uns besuchte Spalten, damit wir bei merged cells nicht doppelt zählen
-                processed_cols = set()
+                processed_cols = set() # Um Duplikate zu vermeiden
 
-                for c in range(3, max_cols - 1):
+                # WICHTIG: Wir iterieren über ALLE Spalten des Headers
+                # Egal wie lang die Schülerzeile ist!
+                
+                max_cols = len(header_row)
+                
+                for c in range(3, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     
-                    # Nur wenn hier ein Questname steht
                     if q_name == "nan" or not q_name.strip(): continue
+                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold"]): continue
                     
-                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold"]): 
-                        continue
-                    
-                    # JETZT DIE LOGIK:
-                    # Wir prüfen die Spalte des Schülers (c) UND die rechts daneben (c+1)
-                    # Suche nach XP > 0
-                    
+                    # XP prüfen
                     xp_val = 0
                     
-                    # Check 1: Rechte Spalte (Standard für XP im neuen Sheet)
-                    val_right = clean_number(student_row.iloc[c+1])
-                    if val_right > 0:
-                        xp_val = val_right
-                        processed_cols.add(c+1) # Überspringe nächste Spalte im Loop
+                    # Versuche sicher auf Schülerdaten zuzugreifen
+                    # Spalte rechts (c+1) ist Standard für XP
+                    try:
+                        # Prüfen ob Schülerzeile lang genug ist für c+1
+                        if c + 1 < len(student_row):
+                            val_right = clean_number(student_row.iloc[c+1])
+                            if val_right > 0:
+                                xp_val = val_right
+                                processed_cols.add(c+1)
+                    except:
+                        pass
                     
-                    # Check 2: Falls rechts nix war, vllt in der aktuellen Spalte?
+                    # Fallback: Gleiche Spalte (c)
                     if xp_val == 0:
-                        val_here = clean_number(student_row.iloc[c])
-                        if val_here > 0:
-                            xp_val = val_here
+                        try:
+                            if c < len(student_row):
+                                val_here = clean_number(student_row.iloc[c])
+                                if val_here > 0:
+                                    xp_val = val_here
+                        except:
+                            pass
 
                     is_done = xp_val > 0
                     
@@ -258,11 +246,13 @@ try:
                             cnt += 1
                 
                 if not found_any:
-                    st.info("Keine Einträge gefunden.")
+                    if show_done:
+                        st.info("Noch keine Quests erledigt.")
+                    else:
+                        st.success("Wow! Keine offenen Quests mehr!")
 
             else:
                 st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
-                st.caption(f"Gesucht nach: {parts}")
 
         else:
             st.error("Gamertag nicht gefunden.")
