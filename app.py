@@ -40,7 +40,7 @@ def calculate_progress(current_xp):
 # --- DATENBANK VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
 
-# Basierend auf deinen CSVs:
+# Die Namen deiner Tabellenblätter (laut CSV)
 blatt_mapping = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
@@ -48,7 +48,7 @@ with st.sidebar:
     if st.button("🔄 Daten aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("Version 4.3 | Fix für XP Rechner 3.0")
+    st.caption("Version 4.4 | Fix für Spaltenindex L=11")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -57,41 +57,40 @@ try:
     # TEIL 1: XP RECHNER LADEN
     # ---------------------------------------------------------
     try:
-        # header=1 bedeutet, Zeile 2 ist der Header (Python Index 1)
-        # Das entspricht deiner CSV Struktur (Vorname, Nachname...)
-        df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
+        # header=None: Wir laden ALLES und greifen hart per Index zu.
+        df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=None, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
         st.stop()
 
     st.info("Logge dich ein, um deinen Status zu sehen.")
-    gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
+    gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. BrAnt")
 
     if gamertag_input:
         input_clean = gamertag_input.strip().lower()
-        
         found_stats = None
         real_name_found = "Unbekannt"
         
-        # --- FIX: HARDCODED SPALTEN FÜR XP RECHNER 3.0 ---
-        # Basierend auf deiner CSV Analyse:
-        # Spalte M (Index 12): Gamertag (Rangliste)
-        # Spalte N (Index 13): XP
-        # Spalte O (Index 14): Level
-        # Spalte P (Index 15): Stufe
-        # Spalte D (Index 3):  Echter Name (Klasse + Name)
+        # --- KORRIGIERTE SPALTEN-INDIZES (0-basiert) ---
+        # Laut deiner CSV "XP Rechner 3.0.csv":
+        # Spalte L (Index 11) = Gamertag (Rangliste)
+        # Spalte M (Index 12) = XP
+        # Spalte N (Index 13) = Level
+        # Spalte O (Index 14) = Stufe / Info
+        # Spalte D (Index 3)  = Echter Name (Klasse + Name)
         
-        col_idx_gamertag = 12
-        col_idx_xp = 13
-        col_idx_level = 14
-        col_idx_stufe = 15
+        col_idx_gamertag = 11
+        col_idx_xp = 12
+        col_idx_level = 13
+        col_idx_stufe = 14
         col_idx_realname = 3
 
-        # Wir iterieren durch die Zeilen
-        for idx, row in df_xp.iterrows():
-            # Sicherheitscheck: Hat die Zeile genug Spalten?
-            if len(row) > col_idx_level:
-                # Gamertag aus Spalte M prüfen
+        # Wir suchen ab Zeile 3 (Index 2), da vorher Header sind
+        start_row = 2 
+
+        for idx, row in df_xp.iloc[start_row:].iterrows():
+            if len(row) > col_idx_stufe:
+                # Gamertag prüfen (Spalte L / 11)
                 gt_cell = str(row.iloc[col_idx_gamertag]).strip().lower()
                 
                 if gt_cell == input_clean:
@@ -101,12 +100,13 @@ try:
                         raw_level = row.iloc[col_idx_level]
                         
                         # Game Over Check
-                        raw_stufe = str(row.iloc[col_idx_stufe]) if len(row) > col_idx_stufe else ""
+                        raw_stufe = str(row.iloc[col_idx_stufe])
                         check_str = f"{raw_level} {raw_stufe}".lower()
                         is_game_over = "†" in check_str or "game" in check_str or "over" in check_str or "tot" in check_str
 
-                        # XP bereinigen
+                        # XP Zahl säubern
                         try:
+                            # Entferne Tausenderpunkte, ersetze Komma durch Punkt
                             xp_str = str(raw_xp).replace('.', '').replace(',', '.')
                             xp_val = int(float(xp_str))
                         except:
@@ -118,16 +118,16 @@ try:
                             "is_game_over": is_game_over
                         }
                         
-                        # Echten Namen speichern
+                        # Echten Namen merken (fürs Questbuch)
                         real_name_found = str(row.iloc[col_idx_realname])
                         
                     except Exception as e:
-                        st.error(f"Fehler beim Lesen der Werte in Zeile {idx}: {e}")
+                        st.error(f"Lesefehler in Zeile {idx}: {e}")
                     
                     break
         
         if found_stats:
-            # --- STATUS ANZEIGE ---
+            # --- ANZEIGE OBEN ---
             if not found_stats["is_game_over"]:
                 st.balloons()
                 st.success(f"Willkommen zurück, **{gamertag_input}**!")
@@ -151,44 +151,41 @@ try:
             # TEIL 2: QUESTBUCH LADEN
             # ---------------------------------------------------------
             try:
-                # Header=None, da wir Zeilen per Index ansprechen wollen
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Quest-Daten nicht verfügbar.")
                 st.stop()
 
-            # Fixe Zeilen aus CSV Questbuch 4.0:
-            # Zeile 2 (Index 1): Quest Namen (Grundregeln...)
+            # Laut CSV "Questbuch 4.0":
+            # Zeile 2 (Index 1): Quest-Namen (Grundregeln etc.)
             quest_names_row = df_quests.iloc[1]
             
-            # Master XP Zeile: Oft Zeile 5 (Index 4). 
-            # Falls die fehlt, versuchen wir später Fallback.
-            quest_xp_master_row = df_quests.iloc[4] if len(df_quests) > 4 else None
-
-            # --- NAMENSSUCHE ---
-            # Wir suchen den Schüler in Spalte B (Index 1) basierend auf der CSV
+            # Schülersuche
             q_idx = -1
             
-            # Name aus XP Rechner aufbereiten
-            # Beispiel: "11T1 Müller Max" -> ["müller", "max"]
-            search_parts = real_name_found.lower().replace("11t1", "").replace("11t2", "").split(" ")
+            # Name aufbereiten (Klasse entfernen)
+            # z.B. "11T1 Antonia Brummer" -> ["antonia", "brummer"]
+            search_parts = real_name_found.lower().replace("11t1", "").replace("11t2", "").replace("11t3", "").replace("11t4", "").split(" ")
             search_tokens = [t for t in search_parts if len(t) > 2]
             if not search_tokens: search_tokens = [real_name_found.lower()]
 
-            # Suche ab Zeile 5 abwärts
-            for idx in range(5, len(df_quests)):
+            # Suche im Questbuch ab Zeile 5 (wo die Schüler stehen)
+            for idx in range(2, len(df_quests)):
                 row = df_quests.iloc[idx]
                 
-                # Wir bauen einen String aus Spalte A und B zusammen, um sicher zu gehen
-                # (CSV sah so aus als wäre es in Spalte B)
-                name_check_str = f"{str(row.iloc[0])} {str(row.iloc[1])}".lower()
+                # Name steht in Spalte B (Index 1) laut CSV
+                name_cell = str(row.iloc[1]).lower()
+                
+                # Manchmal auch Spalte A? Wir checken beides sicherheitshalber
+                name_cell_full = f"{str(row.iloc[0])} {name_cell}".lower()
                 
                 match = True
                 for token in search_tokens:
-                    if token not in name_check_str:
+                    if token not in name_cell_full:
                         match = False
                         break
-                if match:
+                
+                if match and len(name_cell) > 2: # Name muss min. 2 Zeichen haben
                     q_idx = idx
                     break
             
@@ -209,16 +206,16 @@ try:
                 cnt = 0
                 found_any = False
                 
-                # --- QUEST SPALTEN LOGIK ---
-                # Die Quests stehen in Spalte D (Index 3).
-                # Struktur: [D: Name/Status] [E: XP] [F: Name/Status] [G: XP] ...
-                # Also immer Schritte von 2: 3, 5, 7, 9...
+                # --- QUEST LOGIK ---
+                # Quests starten ab Spalte D (Index 3).
+                # Muster: [D: Name/Status] [E: XP] [F: Name/Status] [G: XP] ...
+                # Schrittweite 2: 3, 5, 7, 9...
                 
                 max_col = min(len(quest_names_row), len(student_row))
                 
                 for c in range(3, max_col - 1, 2):
                     try:
-                        # 1. Quest Name aus Header (Zeile 2 / Index 1)
+                        # 1. Quest Name aus Header Zeile 2 (Index 1)
                         q_name = str(quest_names_row.iloc[c])
                         
                         if q_name == "nan" or not q_name.strip(): 
@@ -229,43 +226,23 @@ try:
                         if "summe" in q_check or "game" in q_check or "total" in q_check:
                             continue
 
-                        # 2. Status aus Schülerzeile (Gleiche Spalte wie Name)
+                        # 2. Status aus Schüler-Zeile (Spalte c)
                         status_val = str(student_row.iloc[c]).strip().lower()
                         
-                        # 3. XP Wert holen
-                        # Priorität A: Aus der Spalte direkt rechts daneben beim Schüler (Spalte c + 1)
-                        # (Das sah in der CSV so aus: "Abgeschlossen", "19")
-                        xp_val = "?"
+                        # 3. XP aus Schüler-Zeile (Spalte c+1 -> rechts daneben)
+                        xp_val_raw = student_row.iloc[c + 1]
+                        
                         try:
-                            xp_cell_student = student_row.iloc[c+1]
-                            xp_val = int(float(str(xp_cell_student).replace(',', '.')))
-                            
-                            # Wenn Schüler 0 hat, ist die Quest vllt noch nicht fertig.
-                            # Dann brauchen wir den Max-Wert aus der Master-Zeile (Index 4)
-                            if xp_val == 0 and quest_xp_master_row is not None:
-                                xp_master = quest_xp_master_row.iloc[c] # Oft steht XP im Master unter dem Namen
-                                # Oder auch rechts daneben? In deiner CSV "RPG Maker" standen XP separat.
-                                # Wir versuchen Master-Zeile, Spalte C (gleiche wie Name)
-                                try:
-                                    xp_val = int(float(str(xp_master).replace(',', '.')))
-                                except:
-                                    # Oder Master-Zeile, Spalte C+1
-                                    xp_val = int(float(str(quest_xp_master_row.iloc[c+1]).replace(',', '.')))
-
+                            xp_val = int(float(str(xp_val_raw).replace(',', '.')))
                         except:
                             xp_val = "?"
 
                         # Logik: Abgeschlossen?
                         is_completed = "abgeschlossen" in status_val and "nicht" not in status_val
                         
-                        # Alternativ: Wenn XP > 0 beim Schüler eingetragen sind, gilt es als fertig
-                        try:
-                            val_check = int(float(str(student_row.iloc[c+1]).replace(',', '.')))
-                            if val_check > 0:
-                                is_completed = True
-                                xp_val = val_check # Nimm die echten Punkte
-                        except:
-                            pass
+                        # Zusatzregel: Wenn Punkte eingetragen sind (>0), ist es auch fertig
+                        if isinstance(xp_val, int) and xp_val > 0:
+                             is_completed = True
 
                         if show_done:
                             if is_completed:
@@ -291,12 +268,13 @@ try:
 
             else:
                 st.warning(f"Konnte Quest-Daten für '{real_name_found}' nicht finden.")
-                st.caption(f"Gesucht in Spalten A/B nach: {search_parts}")
+                # Debug Info falls Suche fehlschlägt
+                st.caption(f"Gesucht nach Tokens: {search_tokens}")
 
         else:
             st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
-            st.info("Hinweis: Der Gamertag muss im Blatt 'XP Rechner 3.0' in Spalte M (Rangliste) stehen.")
-
+            st.info("Tipp: Der Gamertag muss im Blatt 'XP Rechner 3.0' in Spalte L (Rangliste) stehen.")
+    
 except Exception as e:
     st.error(f"Ein Systemfehler ist aufgetreten: {e}")
 
