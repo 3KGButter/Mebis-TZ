@@ -3,7 +3,7 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # --- SEITE KONFIGURIEREN ---
-st.set_page_config(page_title="Questlog", page_icon="📐")
+st.set_page_config(page_title="Questlog", page_icon="📐", layout="wide")
 st.title("Questlog")
 
 # --- LEVEL KONFIGURATION ---
@@ -42,10 +42,14 @@ url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTF
 blatt_mapping = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
-# Button zum Neuladen der Daten
+# --- SIDEBAR ---
 with st.sidebar:
+    st.header("Einstellungen")
     if st.button("🔄 Daten aktualisieren"):
         st.cache_data.clear()
+        st.rerun()
+    
+    debug_mode = st.checkbox("🔧 Diagnose-Modus", value=False)
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -53,11 +57,16 @@ try:
     try:
         # ttl=0 holt immer frische Daten
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
-        # Wir entfernen KEINE Leerzeichen aus den Spaltennamen im DataFrame selbst,
-        # um die Indizes nicht durcheinanderzubringen, prüfen aber beim String-Vergleich
+        # Wir bereinigen Spaltennamen nicht global, um Indizes sicher zu halten, 
+        # aber wir suchen robust.
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
         st.stop()
+
+    if debug_mode:
+        st.warning("⚠️ Diagnose-Modus aktiv")
+        st.write("Vorschau der ersten 5 Zeilen der geladenen Tabelle:")
+        st.dataframe(df_xp.head())
 
     st.info("Logge dich ein, um deinen Status zu sehen.")
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
@@ -65,19 +74,17 @@ try:
     if gamertag_input:
         # --- PHASE 1: ECHTEN NAMEN FINDEN (LINKS < SPALTE 11) ---
         real_name_found = None
-        
-        # Wir suchen in den ersten 11 Spalten (Index 0 bis 10)
-        # nach der Spalte "Gamertag" und der Spalte "Klasse + Name"
         col_idx_gamertag_left = -1
         col_idx_name_left = -1
         
+        # Manuelle Suche nach den linken Spalten
         for i in range(min(11, len(df_xp.columns))):
             col_name = str(df_xp.columns[i]).strip()
             if "Gamertag" in col_name:
                 col_idx_gamertag_left = i
             if "Klasse + Name" in col_name:
                 col_idx_name_left = i
-                
+        
         if col_idx_gamertag_left != -1 and col_idx_name_left != -1:
             for idx, row in df_xp.iterrows():
                 val = str(row.iloc[col_idx_gamertag_left]).strip()
@@ -86,67 +93,81 @@ try:
                     break
         
         if not real_name_found:
-            st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten gefunden.")
+            st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten (Links) gefunden.")
             st.stop()
 
         # --- PHASE 2: STATS FINDEN (RECHTS AB SPALTE 24 / Y) ---
         best_stats = None
         
-        # Wir iterieren über ALLE Spalten ab Index 24
+        # Diagnose-Ausgabe sammeln
+        debug_log = []
+        
+        # Wir iterieren STUR über alle Spalten ab Index 24
         for col_idx in range(24, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_idx]).strip()
             
-            # Ist das eine Gamertag-Spalte?
-            if "Gamertag" in col_header:
-                
-                # Jetz suchen wir IN dieser Spalte nach dem User
+            # Debug: Was schauen wir uns gerade an?
+            is_gamertag_col = "Gamertag" in col_header
+            if debug_mode and is_gamertag_col:
+                debug_log.append(f"Spalte {col_idx} ('{col_header}') als Gamertag-Spalte erkannt.")
+
+            if is_gamertag_col:
+                # Suche IN der Spalte
                 for idx, row in df_xp.iterrows():
                     val = str(row.iloc[col_idx]).strip()
                     
                     if val.lower() == gamertag_input.strip().lower():
-                        # TREFFER in einer Klassen-Liste!
+                        if debug_mode:
+                            debug_log.append(f"-> Treffer in Zeile {idx} (Spalte {col_idx})!")
+                        
                         try:
-                            # Struktur Klassenliste:
-                            # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
-                            
+                            # Daten auslesen (relativ zur gefundenen Spalte)
                             raw_xp = row.iloc[col_idx + 1]
                             raw_level = row.iloc[col_idx + 2]
                             
                             # Rang steht links daneben
                             raw_rang = row.iloc[col_idx - 1]
                             
-                            # Stufe (Game Over Info) steht rechts
+                            # Stufe (rechts +3)
                             raw_stufe = ""
                             if len(row) > col_idx + 3:
                                 raw_stufe = str(row.iloc[col_idx + 3])
                                 
-                        except:
-                            continue # Spalte außerhalb, weitersuchen
-                        
-                        # Game Over Check
-                        check_string = f"{raw_level} {raw_stufe}".lower()
-                        is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
-                        
-                        try:
-                            current_xp = int(raw_xp)
-                        except:
-                            current_xp = 0
+                            # Game Over Check
+                            check_string = f"{raw_level} {raw_stufe}".lower()
+                            is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
+                            
+                            try:
+                                current_xp = int(raw_xp)
+                            except:
+                                current_xp = 0
 
-                        match_data = {
-                            "xp": current_xp,
-                            "raw_level": raw_level,
-                            "raw_rang": raw_rang,
-                            "is_game_over": is_game_over
-                        }
-                        
-                        # Logik: Besten Treffer speichern
-                        if best_stats is None:
-                            best_stats = match_data
-                        else:
-                            if match_data["xp"] > best_stats["xp"]:
+                            match_data = {
+                                "xp": current_xp,
+                                "raw_level": raw_level,
+                                "raw_rang": raw_rang,
+                                "is_game_over": is_game_over
+                            }
+                            
+                            if best_stats is None:
                                 best_stats = match_data
-                            elif match_data["xp"] == 0 and match_data["is_game_over"]:
-                                best_stats = match_data
+                            else:
+                                if match_data["xp"] > best_stats["xp"]:
+                                    best_stats = match_data
+                                elif match_data["xp"] == 0 and match_data["is_game_over"]:
+                                    best_stats = match_data
+                        except Exception as e:
+                            if debug_mode:
+                                debug_log.append(f"Fehler beim Lesen der Werte: {e}")
+                            continue
+
+        # DIAGNOSE ANZEIGEN WENN KEIN TREFFER
+        if debug_mode:
+            with st.expander("🕵️ Diagnose-Protokoll ansehen"):
+                for log in debug_log:
+                    st.write(log)
+                if not best_stats:
+                    st.error(f"Kein gültiger Eintrag für {gamertag_input} gefunden.")
 
         if best_stats:
             # Werte formatieren
@@ -164,7 +185,6 @@ try:
             if display_rang.replace('.','',1).isdigit():
                  display_rang = f"#{int(float(display_rang))}"
 
-            # --- ANZEIGE ---
             if not best_stats["is_game_over"]:
                 st.balloons()
             
