@@ -65,9 +65,9 @@ try:
         input_clean = gamertag_input.strip().lower()
         
         # --- SCHRITT 1: ECHTEN NAMEN FINDEN (Links, Spalte 0-10) ---
+        # Nur für interne Quest-Suche nötig (um im Questbuch den Namen zu matchen)
         real_name_found = None
         
-        # Suche im linken Bereich nach der Namens-Zuordnung
         col_idx_gamertag_left = -1
         col_idx_name_left = -1
         
@@ -79,71 +79,82 @@ try:
                 col_idx_name_left = i
         
         if col_idx_gamertag_left != -1 and col_idx_name_left != -1:
-            # Schnelle Suche in der Spalte
-            left_col_data = df_xp.iloc[:, col_idx_gamertag_left].astype(str).str.strip().str.lower()
-            match_idx = left_col_data[left_col_data == input_clean].index
-            
-            if not match_idx.empty:
-                real_name_found = df_xp.iloc[match_idx[0], col_idx_name_left]
+            for idx, row in df_xp.iterrows():
+                val = str(row.iloc[col_idx_gamertag_left]).strip()
+                if val.lower() == input_clean:
+                    real_name_found = row.iloc[col_idx_name_left]
+                    break
         
         if not real_name_found:
-            st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten gefunden.")
+            st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
             st.stop()
 
-        # --- SCHRITT 2: XP & LEVEL FINDEN (AB SPALTE L / 11) ---
-        # HIER DIE ÄNDERUNG: Wir suchen ab Index 11 (Spalte L). 
-        # Das schließt die "Gesamt-Rangliste" (M) UND die "Klassen-Ranglisten" (Y) ein.
+        # --- SCHRITT 2: XP & LEVEL FINDEN (NUR SPALTE L bis P / Index 11-15) ---
+        # Wir beschränken uns strikt auf die Gesamt-Rangliste in der Mitte.
         best_stats = None
         
-        start_scan_idx = 11 # Spalte L
+        # Bereich definieren: Spalte L (11) bis P (15) -> range(11, 16)
+        # Wir suchen darin die Spalte, die "Gamertag" heißt (meist M/12)
+        target_range_start = 11
+        target_range_end = min(17, len(df_xp.columns)) # P/Q als Sicherheit
         
-        for col_idx in range(start_scan_idx, len(df_xp.columns)):
-            col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
-            matches = col_data[col_data == input_clean].index
+        for col_idx in range(target_range_start, target_range_end):
+            col_header = str(df_xp.columns[col_idx]).strip()
             
-            for row_idx in matches:
-                try:
-                    row = df_xp.iloc[row_idx]
-                    
-                    # Annahme: Gamertag -> XP (+1) -> Level (+2)
-                    if col_idx + 2 < len(df_xp.columns):
-                        raw_xp = row.iloc[col_idx + 1]
-                        raw_level = row.iloc[col_idx + 2]
-                    else:
-                        continue
-
-                    # Game Over Check (Level +2 oder Stufe +3 prüfen)
-                    raw_stufe = ""
-                    if col_idx + 3 < len(df_xp.columns):
-                        raw_stufe = str(row.iloc[col_idx + 3])
-                    
-                    check_str = f"{raw_level} {raw_stufe}".lower()
-                    is_game_over = "†" in check_str or "game" in check_str or "over" in check_str
-                    
+            # Ist das eine Gamertag-Spalte?
+            if "Gamertag" in col_header:
+                col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
+                matches = col_data[col_data == input_clean].index
+                
+                for row_idx in matches:
                     try:
-                        xp_val = int(float(str(raw_xp).replace(',','.')))
-                    except:
-                        xp_val = 0
+                        row = df_xp.iloc[row_idx]
                         
-                    stats = {
-                        "xp": xp_val,
-                        "level": raw_level,
-                        "is_game_over": is_game_over
-                    }
-                    
-                    # Wir nehmen den Eintrag mit den meisten XP (oder Game Over wenn 0)
-                    if best_stats is None:
+                        # Struktur in Gesamtliste (L-P):
+                        # Rang (col-1) | Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
+                        
+                        # XP (+1)
+                        if col_idx + 1 < len(df_xp.columns):
+                            raw_xp = row.iloc[col_idx + 1]
+                        else: continue
+                            
+                        # Level (+2)
+                        if col_idx + 2 < len(df_xp.columns):
+                            raw_level = row.iloc[col_idx + 2]
+                        else: continue
+                        
+                        # Stufe (+3) für Game Over
+                        raw_stufe = ""
+                        if col_idx + 3 < len(df_xp.columns):
+                            raw_stufe = str(row.iloc[col_idx + 3])
+                            
+                        check_str = f"{raw_level} {raw_stufe}".lower()
+                        is_game_over = "†" in check_str or "game" in check_str or "over" in check_str
+                        
+                        try:
+                            xp_val = int(float(str(raw_xp).replace(',','.')))
+                        except:
+                            xp_val = 0
+                            
+                        stats = {
+                            "xp": xp_val,
+                            "level": raw_level,
+                            "is_game_over": is_game_over
+                        }
+                        
+                        # Da wir nur in der EINEN "Gesamt-Rangliste" suchen, 
+                        # ist der erste Treffer meist der richtige. 
+                        # Wir nehmen ihn und brechen ab.
                         best_stats = stats
-                    else:
-                        if stats["xp"] > best_stats["xp"]:
-                            best_stats = stats
-                        elif stats["xp"] == 0 and stats["is_game_over"]:
-                            best_stats = stats
-                except:
-                    continue
+                        break 
+                        
+                    except:
+                        continue
+                
+                if best_stats:
+                    break # Gamertag gefunden, Suche beenden
 
         if best_stats:
-            # Formatierung
             display_level = str(best_stats["level"])
             try:
                 display_level = str(int(float(display_level)))
@@ -193,7 +204,6 @@ try:
                 
                 st.divider()
                 
-                # Toggle Switch
                 c_switch, c_text = st.columns([1, 4])
                 with c_switch:
                     show_done = st.toggle("Erledigte anzeigen", value=False)
@@ -212,7 +222,6 @@ try:
                         q_name = str(quest_names.iloc[c])
                         if q_name == "nan" or not q_name.strip(): continue
                         
-                        # Filter für Summen/Game Over Spalten
                         q_check = q_name.lower()
                         if "summe" in q_check or "game" in q_check or "over" in q_check:
                             continue
@@ -263,7 +272,7 @@ try:
                 st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
 
         else:
-            st.error(f"Für '{gamertag_input}' wurden noch keine XP berechnet.")
+            st.error(f"Für '{gamertag_input}' wurden noch keine XP in der Rangliste (Spalte L-P) gefunden.")
 
 except Exception as e:
     st.error("Ein Fehler ist aufgetreten. Bitte Seite neu laden.")
