@@ -37,31 +37,35 @@ def calculate_progress(current_xp):
     text = f"{int(xp_gained_in_level)} / {int(xp_needed_for_level)} XP zum nächsten Level"
     return progress_percent, text
 
-# Hilfsfunktion für XP-Bereinigung (Löst das 10x Problem)
+# --- WICHTIG: DER FIX FÜR DEN 10x XP FEHLER ---
 def clean_xp_value(val):
-    if pd.isna(val) or val == "":
+    """
+    Verwandelt Zelleninhalt sicher in eine Zahl.
+    Verhindert, dass 4349.0 zu 43490 wird.
+    """
+    if pd.isna(val) or val == "" or str(val).strip() == "":
         return 0
     
-    # Wenn es schon eine Zahl ist (int oder float)
+    # 1. Wenn es schon eine Zahl ist, nimm sie direkt (Fix für 10x Problem)
     if isinstance(val, (int, float)):
         return int(val)
     
-    # Wenn es ein String ist
     s_val = str(val).strip()
     
-    # Fall: "4349.0" -> Das ".0" muss weg, nicht einfach der Punkt!
+    # 2. Wenn es wie eine Float aussieht (4349.0), entferne das .0 am Ende
     if s_val.endswith(".0"):
         s_val = s_val[:-2]
         
+    # 3. Jetzt sicher Punkte/Kommas behandeln
     try:
-        # Versuch 1: Als float parsen (behandelt "4349" und "4349.5")
+        # Standard: Komma zu Punkt (Deutsch -> Englisch)
         return int(float(s_val.replace(',', '.')))
     except:
-        # Versuch 2: Tausenderpunkte entfernen (falls "4.349" gemeint ist als 4349)
-        # Aber Vorsicht: Im Englischen ist . Dezimal. 
-        # Wir gehen davon aus, dass in Google Sheets rohe Zahlen stehen.
+        # Fallback: Alles bereinigen
         try:
-            return int(float(s_val))
+            # Entfernt Tausenderpunkte (1.000 -> 1000)
+            clean_str = s_val.replace('.', '').replace(',', '.')
+            return int(float(clean_str))
         except:
             return 0
 
@@ -75,13 +79,16 @@ with st.sidebar:
     if st.button("🔄 Daten aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("Version 4.6 (Fix: XP Berechnung & Quest Spalten)")
+    st.caption("Version 4.7 (Stable)")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # --- TEIL 1: XP RECHNER ---
+    # ------------------------------------------------------------------
+    # TEIL 1: XP RECHNER (GAMERTAG & LEVEL)
+    # ------------------------------------------------------------------
     try:
+        # Wir laden mit header=1 (Zeile 2 ist Header), wie im funktionierenden Original
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
@@ -96,12 +103,16 @@ try:
         found_row_index = -1
         best_stats = None
         
-        # Suche in Spalten L (Index 11) bis Ende
+        # Suche in Spalten L (ca. Index 11) bis Ende nach dem Gamertag
         target_col_start = 11 
         
-        for col_idx in range(target_col_start, len(df_xp.columns)):
+        # Sicherheitscheck, falls Tabelle kleiner ist
+        start_scan = min(target_col_start, len(df_xp.columns)-1)
+
+        for col_idx in range(start_scan, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_idx]).strip()
             
+            # Wir suchen Spalten, die "Gamertag" im Header haben
             if "Gamertag" in col_header:
                 col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
                 matches = col_data[col_data == input_clean].index
@@ -110,9 +121,10 @@ try:
                     found_row_index = matches[0]
                     row = df_xp.iloc[found_row_index]
                     
+                    # Wenn wir Gamertag gefunden haben, stehen XP und Level meist rechts daneben
                     if col_idx + 2 < len(df_xp.columns):
-                        raw_xp = row.iloc[col_idx + 1] # Spalte M
-                        raw_level = row.iloc[col_idx + 2] # Spalte N
+                        raw_xp = row.iloc[col_idx + 1]   # Spalte M (XP)
+                        raw_level = row.iloc[col_idx + 2] # Spalte N (Level)
                         
                         raw_stufe = ""
                         if col_idx + 3 < len(df_xp.columns):
@@ -121,7 +133,7 @@ try:
                         check_str = f"{raw_level} {raw_stufe}".lower()
                         is_game_over = "†" in check_str or "game" in check_str or "over" in check_str
                         
-                        # XP BEREINIGUNG
+                        # HIER: Neue sichere Bereinigung nutzen
                         xp_val = clean_xp_value(raw_xp)
                             
                         best_stats = {
@@ -132,21 +144,23 @@ try:
                     break
 
         if best_stats and found_row_index != -1:
-            # --- ECHTEN NAMEN HOLEN (Spalte D / Index 3) ---
+            # --- NAME FINDEN ---
+            # Wir nehmen den Namen aus Spalte D (Index 3) der gleichen Zeile
             try:
                 real_name_found = str(df_xp.iloc[found_row_index, 3])
             except:
                 real_name_found = "Unbekannt"
 
-            # --- ANZEIGE STATS ---
+            # --- ANZEIGE OBEN ---
             display_level = str(best_stats["level"])
-            try:
-                # Level säubern (falls Kommazahl)
-                display_level = str(int(float(str(display_level).replace(',', '.'))))
-            except:
-                pass 
-            
-            if "†" in str(best_stats["level"]): display_level = "💀"
+            # Level auch sicher säubern, falls "9.0" drin steht
+            if "†" in display_level:
+                display_level = "💀"
+            else:
+                try:
+                    display_level = str(int(float(str(display_level).replace(',', '.'))))
+                except:
+                    pass 
                 
             xp_num = best_stats["xp"]
             is_go = best_stats["is_game_over"]
@@ -170,34 +184,38 @@ try:
                 </div>
                 """, unsafe_allow_html=True)
 
-            # --- TEIL 2: QUESTS LADEN ---
+            # ------------------------------------------------------------------
+            # TEIL 2: QUESTBUCH LADEN (ROBUST)
+            # ------------------------------------------------------------------
             try:
-                # header=None -> Zugriff per Index (0, 1, 2...)
+                # header=None ist wichtig, damit wir per Index zugreifen können
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
-                st.warning("Quest-Daten nicht verfügbar.")
+                st.warning("Quest-Daten konnten nicht geladen werden.")
                 st.stop()
 
-            # Quest-Namen stehen in Zeile 2 (Index 1)
+            # Quest-Namen sind in Zeile 2 (Index 1)
             quest_names_row = df_quests.iloc[1]
             
             # --- SCHÜLER SUCHEN ---
             q_idx = -1
             
-            # Namensaufbereitung
+            # Name vorbereiten
             search_name_clean = real_name_found.strip().lower()
-            # Entferne Klassenbezeichnungen
+            # Klassenbezeichnungen entfernen
             for kl in ["11t1", "11t2", "11t3", "11t4", "12t1", "13t1"]:
                 search_name_clean = search_name_clean.replace(kl, "")
-
+            
+            # Teile Name auf (z.B. "Antonia" und "Brummer")
             search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 2]
             if not search_tokens: search_tokens = [search_name_clean]
 
-            # Suche erst ab Zeile 5 (Datenbereich)
+            # Wir suchen ab Zeile 5 nach unten
             for idx in range(4, len(df_quests)):
                 row = df_quests.iloc[idx]
                 
-                # Wir kombinieren Spalte A und B (Index 0 und 1) für den Namen
+                # Kombiniere Spalte A und B (Index 0 und 1) für den Namen
+                # In deiner CSV ist Spalte A oft leer, B hat den Namen
                 row_txt = f"{str(row.iloc[0])} {str(row.iloc[1])}".lower()
                 
                 match_all = True
@@ -228,34 +246,37 @@ try:
                 found_any = False
                 
                 # --- QUEST SCHLEIFE ---
-                # Beginne bei Spalte D (Index 3). Schrittweite 2.
-                # Spalte C (Index 3) -> Status
-                # Spalte C+1 (Index 4) -> XP
+                # Wir gehen durch die Spalten. Start bei Index 3 (Spalte D).
+                # Immer +2 Schritte (D, F, H...)
                 
+                # Sicherstellen, dass wir nicht über das Ende hinauslaufen
                 max_cols = min(len(quest_names_row), len(student_quest_row))
                 
                 for c in range(3, max_cols - 1, 2):
                     try:
+                        # 1. Name holen
                         q_name = str(quest_names_row.iloc[c])
                         
-                        # Fix: Manchmal steht der Name eine Spalte davor oder ist leer
+                        # Wenn leer, prüfen ob Name vielleicht in Spalte davor steht (Merged Cells Problem)
                         if q_name == "nan" or not q_name.strip():
-                            continue
+                             continue
                         
-                        # Filter
+                        # Filter für "Summe" etc.
                         if any(x in q_name.lower() for x in ["summe", "game", "total", "questart"]): continue
 
-                        # Werte holen
+                        # 2. Werte holen (Status und XP)
+                        # Status steht in Spalte c
                         val_status = str(student_quest_row.iloc[c]).strip().lower()
+                        # XP steht in Spalte c+1 (rechts daneben)
                         val_xp_raw = student_quest_row.iloc[c+1]
                         
                         xp_val = clean_xp_value(val_xp_raw)
                         if xp_val == 0: xp_val = "?"
 
-                        # Status bestimmen
+                        # 3. Status Logik
                         is_completed = "abgeschlossen" in val_status and "nicht" not in val_status
                         
-                        # Wenn XP > 0, ist es fertig (auch wenn Status komisch ist)
+                        # Wenn Punkte > 0 sind, ist es erledigt (auch wenn Status leer ist)
                         if isinstance(xp_val, int) and xp_val > 0:
                             is_completed = True
 
@@ -275,16 +296,19 @@ try:
                                     </div>
                                     """, unsafe_allow_html=True)
                                 cnt += 1
-                    except Exception as loop_err:
-                        # Debugging im Fehlerfall, aber leise weitermachen
+                    except:
                         continue
                 
                 if not found_any:
-                    st.info("Keine Einträge in dieser Kategorie.")
+                    if show_done:
+                        st.info("Noch keine Quests erledigt.")
+                    else:
+                        st.info("Keine offenen Quests in dieser Kategorie.")
 
             else:
-                st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
-                st.caption(f"Gesucht nach Teilen von: {search_tokens}")
+                st.warning(f"Konnte Quests für '{real_name_found}' nicht finden.")
+                # Debugging Info (nur für dich, kann später weg):
+                st.caption(f"Gesucht nach Tokens: {search_tokens}")
 
         else:
             st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
