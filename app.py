@@ -2,9 +2,11 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
+# --- SEITE KONFIGURIEREN ---
 st.set_page_config(page_title="Questlog", page_icon="📐")
 st.title("Questlog")
 
+# --- LEVEL KONFIGURATION ---
 LEVEL_THRESHOLDS = {
     1: 0, 2: 42, 3: 143, 4: 332, 5: 640, 6: 1096, 7: 1728, 8: 2567,
     9: 3640, 10: 4976, 11: 6602, 12: 8545, 13: 10831, 14: 13486, 15: 16536, 16: 20003
@@ -30,10 +32,12 @@ def calculate_progress(current_xp):
     text = f"{int(xp_gained_in_level)} / {int(xp_needed_for_level)} XP zum nächsten Level"
     return progress_percent, text
 
+# --- DATENBANK VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
 blatt_mapping = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
+# Button zum Neuladen
 with st.sidebar:
     if st.button("🔄 Daten aktualisieren"):
         st.cache_data.clear()
@@ -52,6 +56,7 @@ gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
 if gamertag_input:
     input_clean = gamertag_input.strip().lower()
 
+    # --- SCHRITT 1: GAMERTAG SUCHEN (NUR BEREICH L bis P) ---
     found_row_index = -1
     best_stats = None
 
@@ -86,6 +91,7 @@ if gamertag_input:
                 break
 
     if best_stats and found_row_index != -1:
+        # --- SCHRITT 2: ECHTEN NAMEN HOLEN ---
         try:
             real_name_found = str(df_xp.iloc[found_row_index, 3])
         except:
@@ -149,7 +155,7 @@ if gamertag_input:
         st.write(f"🔍 **Suche nach Schüler**: '{real_name_found}' (clean: '{search_name_clean}')")
         st.write(f"🔑 **Tokens**: {search_tokens}")
 
-        for idx in range(6, len(df_quests)):
+        for idx in range(6, len(df_quests)):  # Schülerdaten ab Zeile 7 (Index 6)
             row = df_quests.iloc[idx]
             row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
             match_all = True
@@ -192,12 +198,11 @@ if gamertag_input:
             found_any = False
             quest_count = 0
 
-            start_col = 3
+            start_col = 3  # Spalte D
 
             for c in range(start_col, df_quests.shape[1], 2):
                 try:
                     q_name = str(quest_names.iloc[c]).strip()
-                    
                     if not q_name or q_name.lower() == "nan" or "unnamed" in q_name.lower():
                         continue
 
@@ -208,7 +213,6 @@ if gamertag_input:
                     quest_count += 1
 
                     val = str(student_quest_row.iloc[c]) if c < len(student_quest_row) else ""
-
                     is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
 
                     try:
@@ -256,6 +260,5 @@ if gamertag_input:
                     else:
                         st.balloons()
                         st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
-
     else:
         st.error(f"❌ Gamertag '{gamertag_input}' nicht gefunden.")
