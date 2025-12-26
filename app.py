@@ -53,7 +53,6 @@ try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # ttl=0 für Live-Daten
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
@@ -69,7 +68,7 @@ try:
         found_row_index = -1
         best_stats = None
 
-        target_col_start = 11  # Spalte L (0-basiert)
+        target_col_start = 11
         target_col_end = min(17, len(df_xp.columns))
 
         for col_idx in range(target_col_start, target_col_end):
@@ -144,15 +143,13 @@ try:
 
             # --- SCHRITT 3: QUESTS LADEN ---
             try:
-                # header=None, damit wir mit iloc auf Zeilen zugreifen können
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Quest-Daten nicht verfügbar.")
                 st.stop()
 
-            # Questnamen & XP-Zeile (ggf. anpassen, falls sich in der Tabelle etwas verschiebt)
-            quest_names = df_quests.iloc[1]  # Zeile mit Questnamen
-            quest_xps = df_quests.iloc[4]    # Zeile mit XP-Werten
+            quest_names = df_quests.iloc[1]
+            quest_xps = df_quests.iloc[4]
 
             # --- SCHÜLERZEILE IM QUESTBUCH FINDEN ---
             q_idx = -1
@@ -162,7 +159,6 @@ try:
                 search_tokens = [search_name_clean]
 
             for idx, row in df_quests.iterrows():
-                # Die ersten vier Spalten enthalten i.d.R. Name, Mail, Klasse, XP gesamt
                 row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
 
                 match_all = True
@@ -171,4 +167,89 @@ try:
                         match_all = False
                         break
 
-                if match_all
+                if match_all:
+                    q_idx = idx
+                    break
+
+            if q_idx != -1:
+                student_quest_row = df_quests.iloc[q_idx]
+
+                st.divider()
+
+                c_switch, c_text = st.columns([1, 4])
+                with c_switch:
+                    show_done = st.toggle("Erledigte anzeigen", value=False)
+
+                if show_done:
+                    st.subheader("✅ Erledigte Quests")
+                else:
+                    st.subheader("❌ Offene Quests")
+
+                cols = st.columns(3)
+                cnt = 0
+                found_any = False
+
+                start_col = 3
+
+                for c in range(start_col, df_quests.shape[1], 2):
+                    try:
+                        q_name = str(quest_names.iloc[c]).strip()
+                        if not q_name or q_name.lower() == "nan":
+                            continue
+
+                        q_check = q_name.lower()
+                        if "summe" in q_check or "game" in q_check or "over" in q_check:
+                            continue
+
+                        val = str(student_quest_row.iloc[c])
+
+                        is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
+
+                        try:
+                            xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
+                        except:
+                            xp_val = "?"
+
+                        if show_done:
+                            if is_completed:
+                                found_any = True
+                                with cols[cnt % 3]:
+                                    st.success(f"**{q_name}**\n\n+{xp_val} XP")
+                                cnt += 1
+                        else:
+                            if not is_completed:
+                                found_any = True
+                                with cols[cnt % 3]:
+                                    st.markdown(f"""
+                                    <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
+                                        <strong>{q_name}</strong><br>🔒 {xp_val} XP
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                cnt += 1
+                    except:
+                        continue
+
+                if not found_any:
+                    if show_done:
+                        st.info("Noch keine Quests erledigt.")
+                    else:
+                        if is_go:
+                            st.markdown("""
+                            <div style="text-align: center; margin-top: 20px;">
+                                <h1 style="font-size: 80px;">💀</h1>
+                                <h2 style="color: red;">GAME OVER</h2>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.balloons()
+                            st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
+
+            else:
+                st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
+                st.caption(f"Name aus XP-Tabelle: {real_name_found}")
+
+        else:
+            st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
+
+except Exception as e:
+    st.error("Ein Fehler ist aufgetreten. Bitte Seite neu laden.")
