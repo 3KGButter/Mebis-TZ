@@ -14,7 +14,6 @@ LEVEL_THRESHOLDS = {
 
 def calculate_progress(current_xp):
     current_level = 1
-    # Aktuelles Level bestimmen
     for lvl, threshold in LEVEL_THRESHOLDS.items():
         if current_xp >= threshold:
             current_level = lvl
@@ -45,8 +44,8 @@ try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Zeile 2 als Header (Index 1)
-        df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1)
+        # WICHTIG: ttl=0 zwingt die App, die Daten SOFORT neu zu laden (kein Cache!)
+        df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1, ttl=0)
         df_xp.columns = df_xp.columns.str.strip()
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
@@ -56,24 +55,18 @@ try:
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. JoFel")
 
     if gamertag_input:
-        # --- PHASE 1: IDENTITÄT FINDEN (LINKER BEREICH - STAMMDATEN) ---
-        # Wir suchen den Namen NUR im linken Bereich (Index < 11), da dort die Zuordnung fix ist.
+        # --- PHASE 1: IDENTITÄT FINDEN (LINKER BEREICH) ---
         real_name_found = None
-        
-        # Spalten identifizieren
         left_gamertag_col = None
         name_col = None
         
         for c in df_xp.columns:
             col_idx = df_xp.columns.get_loc(c)
-            # Gamertag Spalte links (meist Spalte E / Index 4)
             if "Gamertag" in str(c) and col_idx < 11:
                 left_gamertag_col = c
-            # Namens Spalte links (meist Spalte D / Index 3)
             if "Klasse + Name" in str(c) and col_idx < 11:
                 name_col = c
         
-        # Suche nach Name
         if left_gamertag_col and name_col:
             for idx, row in df_xp.iterrows():
                 if str(row[left_gamertag_col]).strip().lower() == gamertag_input.strip().lower():
@@ -84,10 +77,8 @@ try:
             st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten gefunden.")
             st.stop()
 
-        # --- PHASE 2: STATS FINDEN (RECHTER BEREICH - RANGLISTE) ---
-        # Wir suchen XP und Level NUR im rechten Bereich (Index >= 11), da dort die berechneten Werte stehen.
+        # --- PHASE 2: STATS FINDEN (RECHTER BEREICH) ---
         best_stats = None
-        
         gamertag_cols_right = [c for c in df_xp.columns if "Gamertag" in str(c) and df_xp.columns.get_loc(c) >= 11]
         
         for g_col in gamertag_cols_right:
@@ -98,10 +89,8 @@ try:
                 
                 if val.lower() == gamertag_input.strip().lower():
                     try:
-                        # Spaltenzuordnung im blauen Bereich: Gamertag | XP | Level | Stufe
                         raw_xp = row.iloc[col_idx + 1]
                         raw_level = row.iloc[col_idx + 2]
-                        # Game Over Check (auch Spalte "Stufe" prüfen)
                         raw_stufe = ""
                         if len(row) > col_idx + 3:
                              raw_stufe = str(row.iloc[col_idx + 3])
@@ -122,17 +111,14 @@ try:
                         "is_game_over": is_game_over
                     }
                     
-                    # Den besten Treffer nehmen (höchste XP, kein Game Over bevorzugt)
-                    if best_stats is None:
-                        best_stats = match_data
-                    elif not is_game_over and best_stats["is_game_over"]:
-                        best_stats = match_data
-                    elif match_data["xp"] > best_stats["xp"]:
-                        best_stats = match_data
+                    # Logik: Wir wollen den aktuellsten Status.
+                    # Wenn irgendwo "Game Over" steht, ist das meist wichtig.
+                    # Aber wenn es mehrere Einträge gibt, nehmen wir sicherheitshalber den Eintrag aus der Klassenliste (oft weiter rechts).
+                    # Einfache Regel hier: Wir überschreiben einfach, wenn wir was finden.
+                    # Da die "Gesamtliste" meist am Ende kommt, gewinnt diese.
+                    best_stats = match_data
 
-        # --- ANZEIGE ---
         if best_stats:
-            # Level formatieren (Ganze Zahl)
             raw_lvl = best_stats["raw_level"]
             display_level = str(raw_lvl)
             try:
@@ -159,7 +145,8 @@ try:
 
             # --- QUESTS LADEN ---
             try:
-                df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None)
+                # Auch hier ttl=0 für frische Quest-Daten
+                df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Konnte Quests nicht laden.")
                 st.stop()
@@ -167,14 +154,10 @@ try:
             quest_names = df_quests.iloc[1] 
             quest_xps = df_quests.iloc[4]
 
-            # Wir suchen mit dem ECHTEN NAMEN (aus Phase 1) im Questbuch
             quest_row_index = -1
-            
-            # Wir bauen den Suchnamen robust (entfernen Leerzeichen am Rand)
             search_name = str(real_name_found).strip().lower()
             
             for idx, row in df_quests.iterrows():
-                # Wir vergleichen unscharf in den ersten Spalten
                 row_str = " ".join([str(x) for x in row.values[:4]]).lower()
                 if search_name in row_str:
                     quest_row_index = idx
@@ -190,13 +173,10 @@ try:
                 
                 erledigt_cols = tab1.columns(3)
                 erledigt_count = 0
-                
                 offen_cols = tab2.columns(3)
                 offen_count = 0
-                
                 found_quests_any = False
                 
-                # Durchlaufe Quests
                 for c in range(3, df_quests.shape[1]):
                     try:
                         q_name = str(quest_names.iloc[c])
