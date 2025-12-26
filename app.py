@@ -60,8 +60,8 @@ if gamertag_input:
     found_row_index = -1
     best_stats = None
 
-    target_col_start = 11
-    target_col_end = min(17, len(df_xp.columns))
+    target_col_start = 11   # Spalte L
+    target_col_end = min(17, len(df_xp.columns))  # bis P (exklusiv)
 
     for col_idx in range(target_col_start, target_col_end):
         col_header = str(df_xp.columns[col_idx]).strip()
@@ -90,4 +90,163 @@ if gamertag_input:
                     }
                 break
 
-    if best_stats and found_row_index
+    # WICHTIG: korrekte if‑Zeile mit Doppelpunkt
+    if best_stats and found_row_index != -1:
+        # --- SCHRITT 2: ECHTEN NAMEN HOLEN ---
+        try:
+            real_name_found = str(df_xp.iloc[found_row_index, 3])
+        except:
+            real_name_found = "Unbekannt"
+
+        display_level = str(best_stats["level"])
+        try:
+            display_level = str(int(float(display_level)))
+        except:
+            pass
+
+        xp_num = best_stats["xp"]
+        is_go = best_stats["is_game_over"]
+
+        if not is_go:
+            st.balloons()
+            st.success(f"Willkommen zurück, Abenteurer **{gamertag_input}**!")
+
+        c1, c2 = st.columns(2)
+        c1.metric("Level", display_level)
+        c2.metric("XP Total", xp_num)
+
+        if not is_go:
+            prog_val, prog_text = calculate_progress(xp_num)
+            st.progress(prog_val, text=prog_text)
+        else:
+            st.markdown("""
+            <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+                <h1 style="color: white; font-size: 80px; margin: 0;">💀</h1>
+                <h2 style="color: white; margin: 0; font-weight: bold;">GAME OVER</h2>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # --- QUESTS LADEN ---
+        try:
+            df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
+        except Exception as e:
+            st.error(f"Fehler beim Laden von '{blatt_quests}': {e}")
+            st.stop()
+
+        # Zeile 2: Questnamen, Zeile 5: XP
+        quest_names = df_quests.iloc[1]
+        quest_xps = df_quests.iloc[4]
+
+        # --- NUR XP‑relevante Quests bestimmen ---
+        # Mapping‑Tabelle steht weiter unten im selben Sheet:
+        # Spalte 0 = Questname, Spalte 3 = XP.
+        mapping_start_row = df_quests.shape[0] - 60  # grobe Grenze nach unten
+        mapping_start_row = max(mapping_start_row, 0)
+        mapping_block = df_quests.iloc[mapping_start_row:, 0:4]
+
+        xp_relevant_names = set(
+            str(r[0]).strip()
+            for _, r in mapping_block.iterrows()
+            if str(r[0]) != "nan" and str(r[3]) != "nan"
+        )
+
+        # --- SCHÜLERZEILE SUCHEN ---
+        q_idx = -1
+        search_name_clean = real_name_found.strip().lower()
+        search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 1]
+        if not search_tokens:
+            search_tokens = [search_name_clean]
+
+        for idx in range(6, len(df_quests)):  # Schülerdaten ab Zeile 7 (Index 6)
+            row = df_quests.iloc[idx]
+            row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
+            match_all = True
+            for token in search_tokens:
+                if token not in row_txt:
+                    match_all = False
+                    break
+            if match_all:
+                q_idx = idx
+                break
+
+        if q_idx == -1:
+            st.error(f"Konnte Quests für '{real_name_found}' nicht laden.")
+            st.caption(f"Name aus XP-Tabelle: {real_name_found}")
+        else:
+            student_quest_row = df_quests.iloc[q_idx]
+
+            st.divider()
+
+            c_switch, c_text = st.columns([1, 4])
+            with c_switch:
+                show_done = st.toggle("Erledigte anzeigen", value=False)
+
+            if show_done:
+                st.subheader("✅ Erledigte Quests")
+            else:
+                st.subheader("❌ Offene Quests")
+
+            cols = st.columns(3)
+            cnt = 0
+            found_any = False
+
+            # Quests liegen in GERADEN Spalten ab Index 2 (C): 2,4,6,...
+            start_col = 2
+
+            for c in range(start_col, df_quests.shape[1], 2):
+                try:
+                    q_name = str(quest_names.iloc[c]).strip()
+                    if not q_name or q_name.lower() == "nan" or "unnamed" in q_name.lower():
+                        continue
+
+                    # Nur Quests anzeigen, die in der Mapping‑Tabelle vorkommen
+                    if q_name not in xp_relevant_names:
+                        continue
+
+                    q_check = q_name.lower()
+                    if "summe" in q_check or "game" in q_check or "over" in q_check:
+                        continue
+
+                    val = str(student_quest_row.iloc[c]) if c < len(student_quest_row) else ""
+                    is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
+
+                    try:
+                        xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
+                    except:
+                        xp_val = "?"
+
+                    if show_done:
+                        if is_completed:
+                            found_any = True
+                            with cols[cnt % 3]:
+                                st.success(f"**{q_name}**\n\n+{xp_val} XP")
+                            cnt += 1
+                    else:
+                        if not is_completed:
+                            found_any = True
+                            with cols[cnt % 3]:
+                                st.markdown(f"""
+                                <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
+                                    <strong>{q_name}</strong><br>🔒 {xp_val} XP
+                                </div>
+                                """, unsafe_allow_html=True)
+                            cnt += 1
+                except Exception:
+                    continue
+
+            if not found_any:
+                if show_done:
+                    st.info("Noch keine Quests erledigt.")
+                else:
+                    if is_go:
+                        st.markdown("""
+                        <div style="text-align: center; margin-top: 20px;">
+                            <h1 style="font-size: 80px;">💀</h1>
+                            <h2 style="color: red;">GAME OVER</h2>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.balloons()
+                        st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
+    else:
+        st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
