@@ -148,18 +148,20 @@ try:
                 st.warning("Quest-Daten nicht verfügbar.")
                 st.stop()
 
-            # Questnamen in Zeile 2, XP in Zeile 5 (0-indiziert)
+            # Questnamen in Zeile 2 (Index 1), XP in Zeile 5 (Index 4)
             quest_names = df_quests.iloc[1]
             quest_xps = df_quests.iloc[4]
 
-            # --- SCHÜLERZEILE IM QUESTBUCH FINDEN ---
+            # --- SCHÜLERZEILE IM QUESTBUCH FINDEN (AB ZEILE 7 / INDEX 6) ---
             q_idx = -1
             search_name_clean = real_name_found.strip().lower()
             search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 1]
             if not search_tokens:
                 search_tokens = [search_name_clean]
 
-            for idx, row in df_quests.iterrows():
+            # Suche ab Index 6 (Zeile 7) nach dem Schüler
+            for idx in range(6, len(df_quests)):
+                row = df_quests.iloc[idx]
                 row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
 
                 match_all = True
@@ -195,7 +197,7 @@ try:
 
                 for c in range(start_col, df_quests.shape[1], 2):
                     try:
-                        # Quest-Name in Zeile 2, Spalte c
+                        # Quest-Name in Zeile 2 (Index 1), Spalte c
                         q_name = str(quest_names.iloc[c]).strip()
                         
                         # ROBUST: Leerzeilen/Unnamed Spalten überspringen
@@ -211,7 +213,7 @@ try:
 
                         is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
 
-                        # XP in Zeile 5, Spalte c (gleiche Spalte wie Quest-Name)
+                        # XP in Zeile 5 (Index 4), Spalte c (gleiche Spalte wie Quest-Name)
                         try:
                             xp_val = int(float(str(quest_xps.iloc[c]).replace(",", ".")))
                         except:
@@ -233,7 +235,7 @@ try:
                                     </div>
                                     """, unsafe_allow_html=True)
                                 cnt += 1
-                    except:
+                    except Exception as e:
                         continue
 
                 if not found_any:
@@ -254,9 +256,11 @@ try:
             else:
                 st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
                 st.caption(f"Name aus XP-Tabelle: {real_name_found}")
+                st.write(f"DEBUG: Suchname: {search_name_clean}")
+                st.write(f"DEBUG: Tokens: {search_tokens}")
 
         else:
             st.error(f"Gamertag '{gamertag_input}' nicht in der Rangliste (Spalte L-P) gefunden.")
 
 except Exception as e:
-    st.error("Ein Fehler ist aufgetreten. Bitte Seite neu laden.")
+    st.error(f"Ein Fehler ist aufgetreten: {str(e)}")
