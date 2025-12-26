@@ -6,118 +6,131 @@ st.set_page_config(page_title="TZ Questlog", page_icon="📐")
 st.title("📐 Technisches Zeichnen - Questlog")
 
 # --- KONFIGURATION ---
-# 1. HIER DEINEN LINK EINFÜGEN:
-url = "https://docs.google.com/spreadsheets/d/DEINE_LANGE_ID_HIER/edit"
+# WICHTIG: Hier nur den Basis-Link rein (ohne /edit#gid=...)
+url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q/edit?gid=353646049#gid=353646049"
 
-# 2. Das Blatt mit der Struktur (Zeile 2 Namen, Zeile 5 XP)
-blatt_name = "Questbuch 4.0"
+# Namen der Blätter exakt wie unten in Google Sheets
+blatt_mapping = "XP Rechner 3.0"
+blatt_quests = "Questbuch 4.0"
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # Wir laden das Blatt OHNE Header, damit wir Zeile 2 und 5 manuell greifen können
-    df = conn.read(spreadsheet=url, worksheet=blatt_name, header=None)
-    
-    # --- DATEN STRUKTURIEREN ---
-    # Zeile 2 in Excel ist Index 1 in Python (0, 1, 2...) -> Quest Namen
-    quest_names_row = df.iloc[1] 
-    # Zeile 5 in Excel ist Index 4 in Python -> XP Werte
-    xp_values_row = df.iloc[4]
 
-    # Wir erstellen ein "Wörterbuch" der Quests: {SpaltenIndex: {'name': 'Lochblech', 'xp': 170}}
-    quest_map = {}
-    
-    # Wir gehen durch alle Spalten (ab Spalte D bzw Index 3, da vorne meist Namen stehen)
-    for col_idx in range(3, len(df.columns)):
-        q_name = str(quest_names_row[col_idx])
-        q_xp = str(xp_values_row[col_idx])
-        
-        # Nur wenn ein Name da ist und XP eine Zahl ist, ist es eine Quest
-        if q_name != "nan" and q_name != "" and q_xp.replace('.','',1).isdigit():
-            quest_map[col_idx] = {
-                "name": q_name,
-                "xp": int(float(q_xp)) # Sicherstellen, dass es eine Zahl ist
-            }
+    # --- SCHRITT 1: GAMERTAG & ECHTNAME LADEN ---
+    # Wir laden erst das Mapping-Blatt, um zu prüfen, wer der User ist
+    try:
+        df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping)
+    except Exception:
+        st.error(f"Fehler 404: Konnte das Blatt '{blatt_mapping}' nicht finden.")
+        st.stop()
 
-    # --- LOGIN ---
-    st.info("Logge dich ein, um deine Quests zu prüfen.")
+    # Login Screen
+    st.info("Logge dich ein, um deinen Status zu sehen.")
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. ElArg")
 
     if gamertag_input:
-        found_student = False
+        # Wir suchen den Gamertag im XP Rechner
+        # Wir suchen eine Spalte, die "Gamertag" heißt (oder ähnlich)
+        col_gamertag = None
+        col_realname = None
         
-        # Wir suchen ab Zeile 10 nach dem Schüler (um Header zu überspringen)
-        # Wir suchen in den ersten 5 Spalten nach dem Gamertag
-        start_row = 10 
-        
-        for index, row in df.iloc[start_row:].iterrows():
-            # Wir prüfen die ersten paar Spalten, ob der Tag drin steht
-            row_start = [str(x).strip().lower() for x in row.values[:5]]
+        # Automatische Spaltensuche
+        for col in df_xp.columns:
+            if "gamertag" in str(col).lower():
+                col_gamertag = col
+            if "name" in str(col).lower() and "user" not in str(col).lower(): # Name, aber nicht Username
+                col_realname = col
+
+        if not col_gamertag:
+            st.error("Konnte Spalte 'Gamertag' im XP Rechner nicht finden.")
+            st.stop()
+
+        # Suchen des Schülers
+        student_entry = df_xp[df_xp[col_gamertag].astype(str).str.strip().str.lower() == gamertag_input.strip().lower()]
+
+        if not student_entry.empty:
+            # TREFFER! Wir haben den Gamertag gefunden.
+            real_name = student_entry.iloc[0][col_realname]
+            level = student_entry.iloc[0].get('Level', 0)
+            xp_total = student_entry.iloc[0].get('XP', 0)
             
-            if gamertag_input.strip().lower() in row_start:
-                found_student = True
-                
-                # --- BERECHNUNG ---
-                total_xp = 0
-                completed_quests = []
-                open_quests = []
-                
-                # Wir gehen durch unsere Quest-Map und schauen, was in der Zeile steht
-                for col_idx, quest_info in quest_map.items():
-                    cell_value = str(row[col_idx]).strip()
-                    
-                    if cell_value == "Abgeschlossen":
-                        total_xp += quest_info['xp']
-                        completed_quests.append(quest_info)
-                    else:
-                        open_quests.append(quest_info)
+            st.balloons()
+            st.success(f"Willkommen, {gamertag_input}! (Level {level})")
+            
+            # --- SCHRITT 2: QUESTBUCH LADEN ---
+            # Jetzt holen wir die Details aus dem Questbuch mit dem ECHTEN NAMEN
+            try:
+                # header=None, weil wir Zeile 2 und 5 manuell brauchen
+                df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None)
+            except:
+                st.error(f"Konnte Blatt '{blatt_quests}' nicht finden.")
+                st.stop()
 
-                # --- LEVEL BERECHNUNG ---
-                # (Hier deine vereinfachte Logik, kannst du anpassen)
-                level = 1
-                if total_xp >= 42: level = 2
-                if total_xp >= 101: level = 3
-                if total_xp >= 189: level = 4
-                if total_xp >= 308: level = 5
-                if total_xp >= 456: level = 6
-                if total_xp >= 650: level = 7
-                if total_xp >= 1000: level = 8
-                if total_xp >= 1600: level = 10 # Beispiel
+            # A. Quest-Struktur verstehen (Zeile 2 = Namen, Zeile 5 = XP)
+            quest_names = df_quests.iloc[1] # Zeile 2
+            quest_xps = df_quests.iloc[4]   # Zeile 5
 
-                # --- ANZEIGE ---
-                st.balloons()
-                st.subheader(f"Hallo {gamertag_input}! 👋")
+            # B. Den Schüler im Questbuch suchen (via Echtname)
+            # Wir suchen in Spalte A oder B (Index 0 oder 1) nach dem Namen
+            quest_row_index = -1
+            
+            # Wir scannen die ersten 100 Zeilen nach dem Namen
+            for idx, row in df_quests.iterrows():
+                # Wir prüfen die ersten paar Spalten auf den Namen
+                row_str = " ".join([str(x) for x in row.values[:3]]).lower()
+                if str(real_name).lower() in row_str:
+                    quest_row_index = idx
+                    break
+            
+            if quest_row_index != -1:
+                # Wir haben die Zeile des Schülers im Questbuch!
+                student_quest_row = df_quests.iloc[quest_row_index]
                 
-                c1, c2 = st.columns(2)
-                c1.metric("Level", level)
-                c2.metric("Aktuelle XP", total_xp)
-                
-                st.progress(min(total_xp / 2000, 1.0), text="Fortschritt im Kurs")
-
-                # --- QUEST LOG ---
                 st.divider()
-                tab1, tab2 = st.tabs(["✅ Erledigte Quests", "❌ Offene Quests"])
+                st.subheader("Deine Quests")
                 
-                with tab1:
-                    if completed_quests:
-                        for q in completed_quests:
-                            st.success(f"**{q['name']}** (+{q['xp']} XP)")
-                    else:
-                        st.write("Noch keine Quests erledigt. Auf geht's!")
+                # Wir gehen durch die Spalten und prüfen auf "Abgeschlossen"
+                cols = st.columns(3)
+                col_counter = 0
                 
-                with tab2:
-                    if open_quests:
-                        for q in open_quests:
-                            st.caption(f"🔒 {q['name']} ({q['xp']} XP)")
-                    else:
-                        st.write("Alles erledigt! Du bist ein Meister!")
+                # Wir starten ab Spalte 3 (D), wo die Quests meist beginnen
+                found_quests = False
+                for c in range(3, len(df_quests.columns)):
+                    q_name = str(quest_names[c])
+                    val = str(student_quest_row[c]) # Was steht beim Schüler drin?
+                    
+                    # Wenn beim Schüler "Abgeschlossen" steht
+                    if "abgeschlossen" in val.lower():
+                        found_quests = True
+                        # XP Wert holen
+                        try:
+                            xp_val = int(float(str(quest_xps[c])))
+                        except:
+                            xp_val = "?"
+                        
+                        # Schöne Karte anzeigen
+                        with cols[col_counter % 3]:
+                            st.markdown(f"""
+                            <div style="background-color: #d4edda; padding: 10px; border-radius: 5px; margin-bottom: 10px;">
+                                <strong>✅ {q_name}</strong><br>
+                                <span style="color: green;">+{xp_val} XP</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        col_counter += 1
                 
-                break # Suche beenden
+                if not found_quests:
+                    st.info("Noch keine Quests im Questbuch als 'Abgeschlossen' markiert.")
+                    
+            else:
+                st.warning(f"Konnte Datensatz für '{real_name}' im Questbuch nicht finden. (Namensschreibweise anders?)")
 
-        if not found_student:
-            st.error(f"Gamertag '{gamertag_input}' im Blatt '{blatt_name}' nicht gefunden.")
-            st.warning("Tipp: Steht der Gamertag wirklich in den ersten 5 Spalten von Questbuch 4.0?")
+        else:
+            st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
 
 except Exception as e:
-    st.error("Fehler beim Laden der Tabelle!")
+    st.error("Kritischer Fehler beim Verbinden:")
     st.code(str(e))
+    st.markdown("⚠️ **Checkliste für 404 Fehler:**")
+    st.markdown("1. Ist der Link oben in Zeile 10 wirklich **ohne** `/edit...` am Ende?")
+    st.markdown(f"2. Heißt das erste Blatt wirklich exakt `{blatt_mapping}`?")
+    st.markdown(f"3. Heißt das zweite Blatt wirklich exakt `{blatt_quests}`?")
