@@ -49,7 +49,10 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     
+    st.write("---")
     debug_mode = st.checkbox("🔧 Diagnose-Modus", value=False)
+    if debug_mode:
+        st.info("Der Diagnose-Modus zeigt dir genau, wo die App sucht.")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -62,9 +65,8 @@ try:
         st.stop()
 
     if debug_mode:
-        st.warning("⚠️ Diagnose-Modus aktiv")
-        st.write(f"Geladene Tabelle hat {len(df_xp.columns)} Spalten.")
-        st.write("Erste 5 Zeilen:")
+        st.write(f"📊 Tabelle geladen: {len(df_xp)} Zeilen, {len(df_xp.columns)} Spalten.")
+        st.write("Vorschau der Rohdaten (erste 5 Zeilen):")
         st.dataframe(df_xp.head())
 
     st.info("Logge dich ein, um deinen Status zu sehen.")
@@ -75,76 +77,89 @@ try:
         
         # --- PHASE 1: ECHTEN NAMEN FINDEN (LINKS < SPALTE 11) ---
         real_name_found = None
+        
+        # Wir suchen in den ersten 11 Spalten
+        # Wir suchen die Spalte "Gamertag " (mit Leerzeichen am Ende, wie in Excel oft üblich)
         col_idx_gamertag_left = -1
         col_idx_name_left = -1
         
-        # Manuelle Suche nach den linken Spalten (in den ersten 11)
         for i in range(min(11, len(df_xp.columns))):
-            col_name = str(df_xp.columns[i]).strip()
-            if "Gamertag" in col_name:
+            col_header = str(df_xp.columns[i])
+            if "Gamertag" in col_header:
                 col_idx_gamertag_left = i
-            if "Klasse + Name" in col_name:
+            if "Klasse + Name" in col_header:
                 col_idx_name_left = i
         
         if col_idx_gamertag_left != -1 and col_idx_name_left != -1:
-            # Suche in der Spalte
-            left_col_data = df_xp.iloc[:, col_idx_gamertag_left].astype(str).str.strip().str.lower()
-            match_idx = left_col_data[left_col_data == input_clean].index
-            
-            if not match_idx.empty:
-                real_name_found = df_xp.iloc[match_idx[0], col_idx_name_left]
+            for idx, row in df_xp.iterrows():
+                val = str(row.iloc[col_idx_gamertag_left]).strip()
+                if val.lower() == input_clean:
+                    real_name_found = row.iloc[col_idx_name_left]
+                    break
         
         if not real_name_found:
-            st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten (Links) gefunden.")
+            st.error(f"Gamertag '{gamertag_input}' nicht in den Stammdaten (linker Bereich) gefunden.")
+            if debug_mode:
+                st.warning(f"Habe in Spalte {col_idx_gamertag_left} gesucht.")
             st.stop()
 
-        # --- PHASE 2: STATS FINDEN (SCAN AB SPALTE 24 / Y) ---
-        # Wir scannen JEDE Spalte ab Index 24 nach dem Gamertag.
+        # --- PHASE 2: TIEFENSUCHE (DEEP SEARCH) AB SPALTE 24 ---
+        # Wir ignorieren Spaltennamen und suchen den Text einfach überall ab Spalte Y.
         best_stats = None
         found_locations = []
 
-        # Bereich: ab Spalte Y (Index 24) bis Ende
-        start_scan_idx = 24
+        start_scan_idx = 24 # Spalte Y
         
+        # Gehe JEDE Spalte durch
         for col_idx in range(start_scan_idx, len(df_xp.columns)):
-            # Hole ganze Spalte als Text
-            col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
             
-            # Finde Zeilen, wo der Gamertag steht
-            matches = col_data[col_data == input_clean].index
+            # Hole die ganze Spalte als Text
+            # (astype(str) verhindert Abstürze bei Zahlen)
+            column_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
             
-            for idx in matches:
-                # Treffer! Wir haben den Gamertag gefunden.
+            # Gibt es hier unseren Gamertag?
+            matches = column_data[column_data == input_clean].index
+            
+            for row_idx in matches:
+                # TREFFER!
                 # Wir gehen davon aus: 
-                # Spalte -1: Rang
-                # Spalte +0: Gamertag (hier sind wir)
-                # Spalte +1: XP
-                # Spalte +2: Level
+                # Spalte -1 = Rang
+                # Spalte +0 = Gamertag (Hier sind wir)
+                # Spalte +1 = XP
+                # Spalte +2 = Level
+                # Spalte +3 = Stufe (Game Over Info)
                 
                 try:
-                    row = df_xp.iloc[idx]
+                    row = df_xp.iloc[row_idx]
                     
-                    # Daten auslesen (relativ zur Fundstelle)
-                    if col_idx + 2 < len(df_xp.columns):
+                    # XP lesen (Rechts +1)
+                    if col_idx + 1 < len(df_xp.columns):
                         raw_xp = row.iloc[col_idx + 1]
+                    else:
+                        raw_xp = 0
+                        
+                    # Level lesen (Rechts +2)
+                    if col_idx + 2 < len(df_xp.columns):
                         raw_level = row.iloc[col_idx + 2]
                     else:
-                        continue # Spalte zu weit rechts, kann keine Daten enthalten
+                        raw_level = 0
                         
-                    raw_rang = "?"
+                    # Rang lesen (Links -1)
                     if col_idx > 0:
                         raw_rang = row.iloc[col_idx - 1]
+                    else:
+                        raw_rang = "?"
                     
-                    # Stufe/Info (Game Over Check)
-                    raw_stufe = ""
+                    # Stufe lesen (Rechts +3) für Game Over
                     if col_idx + 3 < len(df_xp.columns):
                         raw_stufe = str(row.iloc[col_idx + 3])
-                        
-                    # Game Over Check
+                    else:
+                        raw_stufe = ""
+
+                    # Daten aufbereiten
                     check_string = f"{raw_level} {raw_stufe}".lower()
                     is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
                     
-                    # XP in Zahl wandeln
                     try:
                         current_xp = int(raw_xp)
                     except:
@@ -155,30 +170,32 @@ try:
                         "raw_level": raw_level,
                         "raw_rang": raw_rang,
                         "is_game_over": is_game_over,
-                        "location": f"Zeile {idx}, Spalte {col_idx}"
+                        "debug_loc": f"Z{row_idx}/S{col_idx}"
                     }
-                    found_locations.append(match_data)
                     
+                    found_locations.append(match_data)
+
                 except Exception as e:
                     if debug_mode:
-                        st.warning(f"Fehler beim Lesen von Zeile {idx}: {e}")
+                        st.warning(f"Fehler beim Lesen bei Z{row_idx}/S{col_idx}: {e}")
                     continue
 
-        # Besten Treffer auswählen
+        # Auswertung der Treffer
         for cand in found_locations:
             if best_stats is None:
                 best_stats = cand
             else:
-                # Bevorzuge Nicht-Game-Over, dann höhere XP
-                if not cand["is_game_over"] and best_stats["is_game_over"]:
+                # Logik: Nimm den mit mehr XP, außer er ist Game Over und hat 0
+                if cand["xp"] > best_stats["xp"]:
                     best_stats = cand
-                elif cand["is_game_over"] == best_stats["is_game_over"]:
-                    if cand["xp"] > best_stats["xp"]:
-                        best_stats = cand
+                elif cand["xp"] == 0 and cand["is_game_over"]:
+                    best_stats = cand
 
-        # Debug Infos anzeigen
+        # Debug Ausgabe
         if debug_mode:
-            st.write(f"Gefundene Einträge für '{gamertag_input}': {found_locations}")
+            st.write(f"🔍 Gefundene Einträge für '{input_clean}':")
+            for loc in found_locations:
+                st.json(loc)
 
         if best_stats:
             # Werte formatieren
@@ -196,6 +213,7 @@ try:
             if display_rang.replace('.','',1).isdigit():
                  display_rang = f"#{int(float(display_rang))}"
 
+            # --- ANZEIGE ---
             if not best_stats["is_game_over"]:
                 st.balloons()
             
@@ -225,6 +243,7 @@ try:
             quest_row_index = -1
             search_name = str(real_name_found).strip().lower()
             
+            # Questbuch Suche
             for idx, row in df_quests.iterrows():
                 row_str = " ".join([str(x) for x in row.values[:4]]).lower()
                 if search_name in row_str:
@@ -290,7 +309,9 @@ try:
                 st.warning(f"Konnte Quest-Log für '{real_name_found}' nicht synchronisieren.")
 
         else:
-            st.error(f"Gamertag '{gamertag_input}' in der Klassen-Rangliste (ab Spalte Y) nicht gefunden. (Im Diagnose-Modus prüfen!)")
+            st.error(f"Gamertag '{gamertag_input}' im Bereich ab Spalte Y nicht gefunden.")
+            if debug_mode:
+                st.write("Tipp: Prüfe im Excel-File, ob der Gamertag wirklich rechts ab Spalte Y (Index 24) steht.")
 
 except Exception as e:
     st.error(f"Ein technischer Fehler ist aufgetreten: {str(e)}")
