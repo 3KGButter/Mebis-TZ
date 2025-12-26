@@ -90,7 +90,7 @@ if gamertag_input:
                     }
                 break
 
-    # WICHTIG: korrekte if‑Zeile mit Doppelpunkt
+    # ---- WICHTIG: HIER DER KORREKTE IF-SATZ ----
     if best_stats and found_row_index != -1:
         # --- SCHRITT 2: ECHTEN NAMEN HOLEN ---
         try:
