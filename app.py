@@ -3,6 +3,7 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # --- SEITE KONFIGURIEREN ---
+# Hier angepasst: Kurzer Titel, Icon nur im Browser-Tab
 st.set_page_config(page_title="Questlog", page_icon="📐")
 st.title("Questlog")
 
@@ -161,7 +162,7 @@ try:
             
             st.success(f"Willkommen zurück, **{gamertag_input}**!")
             
-            # Schlichte 2-Spalten-Optik
+            # Schlichte 2-Spalten-Optik (Rang entfernt, da fehleranfällig)
             c1, c2 = st.columns(2)
             c1.metric("Level", display_level)
             c2.metric("XP Total", xp_num)
