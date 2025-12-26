@@ -36,8 +36,8 @@ def calculate_progress(current_xp):
 
 def clean_number(val):
     """
-    Bereinigt Zahlen robust.
-    Löst das 4349.0 -> 43490 Problem.
+    Robuste Zahlenreinigung.
+    Macht aus '4349.0' -> 4349 und fängt leere Felder ab.
     """
     if pd.isna(val) or str(val).strip() == "":
         return 0
@@ -47,11 +47,9 @@ def clean_number(val):
         
     s = str(val).strip()
     
-    # Entferne ".0" am Ende
     if s.endswith(".0"):
         s = s[:-2]
     
-    # Standardisierung: Tausenderpunkte weg, Komma zu Punkt
     s = s.replace('.', '').replace(',', '.')
     
     try:
@@ -68,13 +66,13 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v5.2 - Safe Row Access")
+    st.caption("v5.3 - Short Row Fix")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ----------------------------------------------------------------
-    # 1. LOGIN & XP (XP Rechner 3.0)
+    # 1. LOGIN & XP
     # ----------------------------------------------------------------
     try:
         # header=1 (Zeile 2 sind Überschriften)
@@ -95,6 +93,7 @@ try:
         # Suche ab Spalte L (Index 11)
         start_col = 11
         
+        # Wir scannen nach Gamertag Spalten
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
             
@@ -146,7 +145,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Verbesserte Logik für offene Quests)
+            # 2. QUESTBUCH
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -167,7 +166,6 @@ try:
             for i in range(4, len(df_q)):
                 r = df_q.iloc[i]
                 txt = f"{r.iloc[0]} {r.iloc[1]}".lower()
-                
                 match = True
                 for p in parts:
                     if p not in txt:
@@ -186,11 +184,11 @@ try:
                 cols = st.columns(3)
                 cnt = 0
                 found_any = False
-                processed_cols = set() # Um Duplikate zu vermeiden
+                processed_cols = set()
 
-                # WICHTIG: Wir iterieren über ALLE Spalten des Headers
-                # Egal wie lang die Schülerzeile ist!
-                
+                # --- WICHTIGSTE ÄNDERUNG ---
+                # Wir nehmen IMMER die Länge der Header-Zeile als Limit.
+                # Wenn die Schülerzeile kürzer ist, fangen wir das mit try/except ab.
                 max_cols = len(header_row)
                 
                 for c in range(3, max_cols):
@@ -201,22 +199,23 @@ try:
                     if q_name == "nan" or not q_name.strip(): continue
                     if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold"]): continue
                     
-                    # XP prüfen
                     xp_val = 0
                     
-                    # Versuche sicher auf Schülerdaten zuzugreifen
-                    # Spalte rechts (c+1) ist Standard für XP
+                    # Wir versuchen sicher, XP zu lesen.
+                    # Wenn der Index beim Schüler nicht existiert (Zeile zu kurz), ist XP = 0.
+                    
+                    # Versuch 1: Rechte Spalte (Standard)
                     try:
-                        # Prüfen ob Schülerzeile lang genug ist für c+1
                         if c + 1 < len(student_row):
                             val_right = clean_number(student_row.iloc[c+1])
                             if val_right > 0:
                                 xp_val = val_right
                                 processed_cols.add(c+1)
+                        # Wenn c+1 schon out of bounds ist, passiert nichts -> XP bleibt 0
                     except:
                         pass
                     
-                    # Fallback: Gleiche Spalte (c)
+                    # Versuch 2: Gleiche Spalte (Fallback)
                     if xp_val == 0:
                         try:
                             if c < len(student_row):
@@ -249,7 +248,7 @@ try:
                     if show_done:
                         st.info("Noch keine Quests erledigt.")
                     else:
-                        st.success("Wow! Keine offenen Quests mehr!")
+                        st.info("Keine offenen Quests mehr!")
 
             else:
                 st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
