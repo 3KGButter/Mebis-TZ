@@ -103,12 +103,17 @@ try:
                 
                 if val.lower() == gamertag_input.strip().lower():
                     try:
+                        # Spaltenzuordnung im blauen Bereich:
+                        # Gamertag (col) | XP (col+1) | Level (col+2) | Stufe (col+3)
                         raw_xp = row.iloc[col_idx + 1]
                         raw_level = row.iloc[col_idx + 2]
+                        raw_stufe = row.iloc[col_idx + 3] # Hier steht oft "GameOver"
                     except:
                         continue 
                     
-                    is_game_over = "†" in str(raw_level) or "Game" in str(raw_level)
+                    # Game Over Check: Prüfe Level, XP UND Stufe
+                    check_string = f"{raw_level} {raw_stufe}".lower()
+                    is_game_over = "†" in check_string or "game" in check_string or "over" in check_string
                     
                     try:
                         current_xp = int(raw_xp)
@@ -119,10 +124,11 @@ try:
                         "row": row,
                         "xp": current_xp,
                         "raw_level": raw_level,
+                        "raw_stufe": raw_stufe,
                         "is_game_over": is_game_over
                     }
                     
-                    # Den besten Treffer nehmen (höchste XP, kein Game Over bevorzugt)
+                    # Den besten Treffer nehmen
                     if best_match is None:
                         best_match = match_data
                     elif not is_game_over and best_match["is_game_over"]:
@@ -140,7 +146,15 @@ try:
                         internal_real_name = best_match["row"][c]
                         break
 
-            display_level = str(best_match["raw_level"])
+            # --- LEVEL FORMATIERUNG (Ganze Zahl) ---
+            raw_lvl = best_match["raw_level"]
+            display_level = str(raw_lvl)
+            try:
+                # Versuch in Float und dann Int zu wandeln (entfernt .0)
+                display_level = str(int(float(raw_lvl)))
+            except:
+                pass # Falls es Text ist (z.B. †), so lassen
+
             xp_num = best_match["xp"]
             
             # Anzeige
@@ -158,7 +172,7 @@ try:
             if not best_match["is_game_over"]:
                 prog_val, prog_text = calculate_progress(xp_num)
                 st.progress(prog_val, text=prog_text)
-            elif "†" in display_level:
+            else:
                 st.error("💀 GAME OVER - Bitte beim Lehrer melden!")
 
             # --- QUESTS LADEN ---
