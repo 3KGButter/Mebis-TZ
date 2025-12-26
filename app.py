@@ -3,7 +3,6 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # --- SEITE KONFIGURIEREN ---
-# Hier angepasst: Kurzer Titel, Icon nur im Browser-Tab
 st.set_page_config(page_title="Questlog", page_icon="📐")
 st.title("Questlog")
 
@@ -66,10 +65,7 @@ try:
         input_clean = gamertag_input.strip().lower()
         
         # --- SCHRITT 1: ECHTEN NAMEN FINDEN (Links, Spalte 0-10) ---
-        # Nur für interne Quest-Suche nötig
         real_name_found = None
-        
-        # Wir suchen Spalten, die "Gamertag" und "Name" heißen im linken Bereich
         col_idx_gamertag_left = -1
         col_idx_name_left = -1
         
@@ -92,10 +88,8 @@ try:
             st.stop()
 
         # --- SCHRITT 2: XP & LEVEL FINDEN (Rechts, ab Spalte L/11) ---
-        # Wir suchen einfach überall nach dem Gamertag und nehmen das beste Ergebnis.
         best_stats = None
         
-        # Wir scannen ab Spalte L (Index 11) bis zum Ende
         for col_idx in range(11, len(df_xp.columns)):
             col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
             matches = col_data[col_data == input_clean].index
@@ -104,15 +98,13 @@ try:
                 try:
                     row = df_xp.iloc[row_idx]
                     
-                    # Wir nehmen an: Gamertag -> XP (+1) -> Level (+2)
                     if col_idx + 2 < len(df_xp.columns):
                         raw_xp = row.iloc[col_idx + 1]
                         raw_level = row.iloc[col_idx + 2]
                     else:
                         continue
 
-                    # Game Over Check (Suche in Level und Nachbarzellen nach Kreuz oder Text)
-                    # Wir prüfen Level (+2) und Stufe (+3)
+                    # Game Over Check
                     raw_stufe = ""
                     if col_idx + 3 < len(df_xp.columns):
                         raw_stufe = str(row.iloc[col_idx + 3])
@@ -131,14 +123,11 @@ try:
                         "is_game_over": is_game_over
                     }
                     
-                    # Entscheidung: Ist das der "beste" Eintrag?
                     if best_stats is None:
                         best_stats = stats
                     else:
-                        # Bevorzuge Einträge, die NICHT Game Over sind
                         if not stats["is_game_over"] and best_stats["is_game_over"]:
                             best_stats = stats
-                        # Wenn beide gleich sind (beide ok oder beide tot), nimm den mit MEHR XP
                         elif stats["is_game_over"] == best_stats["is_game_over"]:
                             if stats["xp"] > best_stats["xp"]:
                                 best_stats = stats
@@ -146,7 +135,6 @@ try:
                     continue
 
         if best_stats:
-            # Formatierung
             display_level = str(best_stats["level"])
             try:
                 display_level = str(int(float(display_level)))
@@ -162,7 +150,6 @@ try:
             
             st.success(f"Willkommen zurück, **{gamertag_input}**!")
             
-            # Schlichte 2-Spalten-Optik (Rang entfernt, da fehleranfällig)
             c1, c2 = st.columns(2)
             c1.metric("Level", display_level)
             c2.metric("XP Total", xp_num)
@@ -183,11 +170,9 @@ try:
             quest_names = df_quests.iloc[1] 
             quest_xps = df_quests.iloc[4]
 
-            # Namenssuche im Questbuch
             q_idx = -1
             search_name = str(real_name_found).strip().lower()
             
-            # Wir suchen in den ersten 4 Spalten nach dem Namen
             for idx, row in df_quests.iterrows():
                 row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
                 if search_name in row_txt:
@@ -198,59 +183,54 @@ try:
                 student_quest_row = df_quests.iloc[q_idx]
                 
                 st.divider()
-                st.subheader("Deine Quests")
                 
-                tab1, tab2 = st.tabs(["✅ Erledigt", "❌ Offen"])
+                # --- TOGGLE SWITCH UI ---
+                # Wir verwenden den nativen Streamlit Toggle für die Logik
+                c_switch, c_text = st.columns([1, 4])
+                with c_switch:
+                    show_done = st.toggle("Erledigte anzeigen", value=False)
                 
-                with tab1:
-                    cols = st.columns(3)
-                    cnt = 0
-                    found_any = False
-                    
-                    for c in range(3, df_quests.shape[1]):
+                if show_done:
+                    st.subheader("✅ Erledigte Quests")
+                else:
+                    st.subheader("❌ Offene Quests")
+
+                cols = st.columns(3)
+                cnt = 0
+                found_any = False
+                
+                # Durch die Quests iterieren
+                for c in range(3, df_quests.shape[1]):
+                    try:
+                        q_name = str(quest_names.iloc[c])
+                        
+                        # --- FILTER: Leere Spalten, Summe und Game Over rauswerfen ---
+                        if q_name == "nan" or not q_name.strip(): continue
+                        q_check = q_name.lower()
+                        if "summe" in q_check or "game" in q_check or "over" in q_check:
+                            continue
+                        
+                        val = str(student_quest_row.iloc[c])
+                        is_completed = "abgeschlossen" in val.lower() and "nicht" not in val.lower()
+                        
+                        # XP holen
                         try:
-                            q_name = str(quest_names.iloc[c])
-                            if q_name == "nan" or not q_name.strip(): continue
-                            
-                            val = str(student_quest_row.iloc[c])
-                            
-                            if "abgeschlossen" in val.lower() and "nicht" not in val.lower():
+                            xp_val = int(float(str(quest_xps.iloc[c])))
+                        except:
+                            xp_val = "?"
+
+                        # LOGIK: Toggle entscheidet was angezeigt wird
+                        if show_done:
+                            # Zeige nur erledigte
+                            if is_completed:
                                 found_any = True
-                                try:
-                                    xp_val = int(float(str(quest_xps.iloc[c])))
-                                except:
-                                    xp_val = "?"
-                                    
                                 with cols[cnt % 3]:
                                     st.success(f"**{q_name}**\n\n+{xp_val} XP")
                                 cnt += 1
-                        except:
-                            continue
-                            
-                    if not found_any:
-                        if is_go:
-                            st.markdown("""
-                            <div style="text-align: center; margin-top: 20px;">
-                                <h1 style="font-size: 80px;">💀</h1>
-                                <h2 style="color: red;">GAME OVER</h2>
-                            </div>
-                            """, unsafe_allow_html=True)
                         else:
-                            st.info("Noch keine Quests abgeschlossen.")
-
-                with tab2:
-                    cols = st.columns(3)
-                    cnt = 0
-                    for c in range(3, df_quests.shape[1]):
-                        try:
-                            q_name = str(quest_names.iloc[c])
-                            if q_name == "nan" or not q_name.strip(): continue
-                            val = str(student_quest_row.iloc[c])
-                            if not ("abgeschlossen" in val.lower() and "nicht" not in val.lower()):
-                                try:
-                                    xp_val = int(float(str(quest_xps.iloc[c])))
-                                except:
-                                    xp_val = "?"
+                            # Zeige nur offene (Standardansicht)
+                            if not is_completed:
+                                found_any = True
                                 with cols[cnt % 3]:
                                     st.markdown(f"""
                                     <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
@@ -258,14 +238,30 @@ try:
                                     </div>
                                     """, unsafe_allow_html=True)
                                 cnt += 1
-                        except:
-                            continue
+                    except:
+                        continue
+                        
+                if not found_any:
+                    if show_done:
+                        st.info("Noch keine Quests erledigt.")
+                    else:
+                        # Wenn keine offenen Quests da sind
+                        if is_go:
+                            # Bei Game Over keine "Alles erledigt" Nachricht, sondern Totenkopf
+                            st.markdown("""
+                            <div style="text-align: center; margin-top: 20px;">
+                                <h1 style="font-size: 80px;">💀</h1>
+                                <h2 style="color: red;">GAME OVER</h2>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.balloons()
+                            st.success("Alles erledigt! Du bist auf dem neuesten Stand.")
 
             else:
                 st.warning(f"Konnte Quests für '{real_name_found}' nicht laden.")
 
         else:
-            # Falls Name gefunden (Links), aber keine XP (Rechts)
             st.error(f"Für '{gamertag_input}' wurden noch keine XP berechnet.")
 
 except Exception as e:
