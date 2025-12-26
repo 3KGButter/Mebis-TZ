@@ -68,8 +68,6 @@ try:
         found_row_index = -1
         best_stats = None
         
-        # Bereich: L (Index 11) bis P (Index 15)
-        # Wir suchen die Spalte "Gamertag" in diesem Bereich
         target_col_start = 11 
         target_col_end = min(17, len(df_xp.columns))
         
@@ -77,23 +75,17 @@ try:
             col_header = str(df_xp.columns[col_idx]).strip()
             
             if "Gamertag" in col_header:
-                # Spalte gefunden! Jetzt suchen wir den User.
                 col_data = df_xp.iloc[:, col_idx].astype(str).str.strip().str.lower()
                 matches = col_data[col_data == input_clean].index
                 
                 if not matches.empty:
-                    # Treffer! Wir nehmen den ersten (sollte eindeutig sein)
                     found_row_index = matches[0]
-                    
-                    # Daten aus dieser Zeile lesen
                     row = df_xp.iloc[found_row_index]
                     
-                    # Annahme: XP ist +1 (rechts), Level ist +2 (rechts)
                     if col_idx + 2 < len(df_xp.columns):
                         raw_xp = row.iloc[col_idx + 1]
                         raw_level = row.iloc[col_idx + 2]
                         
-                        # Game Over Check (Stufe ist meist +3)
                         raw_stufe = ""
                         if col_idx + 3 < len(df_xp.columns):
                             raw_stufe = str(row.iloc[col_idx + 3])
@@ -111,13 +103,11 @@ try:
                             "level": raw_level,
                             "is_game_over": is_game_over
                         }
-                    break # Wir haben den Gamertag gefunden, Abbruch
+                    break
 
         if best_stats and found_row_index != -1:
-            # --- SCHRITT 2: ECHTEN NAMEN HOLEN (SPALTE D / INDEX 3) ---
-            # Wir nehmen die exakt gleiche Zeile (found_row_index)
+            # --- SCHRITT 2: ECHTEN NAMEN HOLEN ---
             try:
-                # Spalte D ist Index 3 (A=0, B=1, C=2, D=3)
                 real_name_found = str(df_xp.iloc[found_row_index, 3])
             except:
                 real_name_found = "Unbekannt"
@@ -134,8 +124,8 @@ try:
 
             if not is_go:
                 st.balloons()
-            
-            st.success(f"Willkommen zurück, **{gamertag_input}**!")
+                # HIER NEU: Begrüßungstext angepasst
+                st.success(f"Willkommen zurück, Abenteurer **{gamertag_input}**!")
             
             c1, c2 = st.columns(2)
             c1.metric("Level", display_level)
@@ -145,7 +135,13 @@ try:
                 prog_val, prog_text = calculate_progress(xp_num)
                 st.progress(prog_val, text=prog_text)
             else:
-                st.error("💀 GAME OVER - Bitte beim Lehrer melden!")
+                # HIER NEU: Große rote Box ohne Zusatztext
+                st.markdown("""
+                <div style="background-color: #ff4b4b; padding: 20px; border-radius: 10px; text-align: center; margin-bottom: 20px;">
+                    <h1 style="color: white; font-size: 80px; margin: 0;">💀</h1>
+                    <h2 style="color: white; margin: 0; font-weight: bold;">GAME OVER</h2>
+                </div>
+                """, unsafe_allow_html=True)
 
             # --- SCHRITT 3: QUESTS LADEN ---
             try:
@@ -157,16 +153,12 @@ try:
             quest_names = df_quests.iloc[1] 
             quest_xps = df_quests.iloc[4]
 
-            # Wir suchen den Realnamen im Questbuch
             q_idx = -1
             search_name_clean = real_name_found.strip().lower()
-            
-            # Token-Check für Robustheit (Vorname/Nachname Dreher)
             search_tokens = [t for t in search_name_clean.split(" ") if len(t) > 1]
             if not search_tokens: search_tokens = [search_name_clean]
 
             for idx, row in df_quests.iterrows():
-                # Wir scannen die ersten 4 Spalten nach dem Namen
                 row_txt = " ".join([str(x) for x in row.values[:4]]).lower()
                 
                 match_all = True
@@ -184,7 +176,6 @@ try:
                 
                 st.divider()
                 
-                # Toggle Switch UI
                 c_switch, c_text = st.columns([1, 4])
                 with c_switch:
                     show_done = st.toggle("Erledigte anzeigen", value=False)
