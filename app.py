@@ -2,14 +2,15 @@ import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
+# --- SEITE KONFIGURIEREN ---
 st.set_page_config(page_title="TZ Questlog", page_icon="📐")
 st.title("📐 Technisches Zeichnen - Questlog")
 
 # --- KONFIGURATION ---
-# WICHTIG: Hier deinen Link einfügen (ohne /edit am Ende)
-url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q/edit?gid=353646049#gid=353646049"
+# Dein Link ist jetzt fest hinterlegt:
+url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
 
-# Namen der Blätter exakt wie unten in Google Sheets
+# Die Namen der Tabellenblätter (exakt so wie unten in Google Sheets)
 blatt_mapping = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
@@ -18,92 +19,111 @@ try:
 
     # --- SCHRITT 1: GAMERTAG & ECHTNAME LADEN ---
     try:
-        # FIX: header=1 bedeutet, wir nehmen die ZWEITE Zeile als Überschrift (Index 1)
-        # Das überspringt die Zeile mit "aus Klassenliste kopieren..."
+        # header=1 bedeutet: Wir überspringen Zeile 1 ("aus Klassenliste kopieren")
+        # und nehmen Zeile 2 als echte Überschriften.
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_mapping, header=1)
         
-        # Falls pandas leere Spaltennamen generiert hat, bereinigen wir das
+        # Spaltennamen bereinigen (Leerzeichen entfernen)
         df_xp.columns = df_xp.columns.str.strip()
     except Exception as e:
-        st.error(f"Fehler beim Laden von '{blatt_mapping}': {e}")
+        st.error(f"Fehler beim Laden von '{blatt_mapping}'. Existiert das Blatt?")
         st.stop()
 
-    # Login Screen
     st.info("Logge dich ein, um deinen Status zu sehen.")
     gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. BrAnt")
 
     if gamertag_input:
-        # Wir suchen die Spalten dynamisch
+        # --- SPALTEN SUCHEN ---
         col_gamertag = None
         col_realname = None
         
-        # Wir suchen nach "Gamertag" und einer Spalte, die den vollen Namen enthält
-        # In deiner Datei heißt die Namens-Spalte oft "Klasse + Name..."
+        # Wir suchen die Spalte "Gamertag"
         for col in df_xp.columns:
-            c_str = str(col).lower()
-            if "gamertag" in c_str:
+            if "gamertag" in str(col).lower():
                 col_gamertag = col
-                # Wir brechen ab, sobald wir den ersten Gamertag finden (Spalte E)
                 break 
         
-        # Für den echten Namen suchen wir die Spalte D
-        # Da wir header=1 nutzen, sollte sie "Klasse + Name" oder ähnlich heißen
+        # Wir suchen die Spalte mit dem Namen (meist "Klasse + Name")
         for col in df_xp.columns:
             if "klasse + name" in str(col).lower():
                 col_realname = col
                 break
         
-        # Fallback: Falls wir die Namensspalte nicht finden, nehmen wir Spalte Index 3 (D)
+        # Fallback, falls Name nicht gefunden wird (wir nehmen Spalte D / Index 3)
         if not col_realname and len(df_xp.columns) > 3:
              col_realname = df_xp.columns[3]
 
         if not col_gamertag:
-            st.error("Konnte Spalte 'Gamertag' auch in Zeile 2 nicht finden.")
-            st.write("Gefundene Spalten:", list(df_xp.columns))
+            st.error("Konnte Spalte 'Gamertag' nicht finden.")
             st.stop()
 
-        # Suchen des Schülers (Groß-/Kleinschreibung egal)
-        # Wir wandeln die Spalte in Text um, entfernen Leerzeichen und vergleichen
+        # --- SCHÜLER SUCHEN ---
+        # Wir machen alles klein (.lower()), damit Groß-/Kleinschreibung egal ist
         student_entry = df_xp[df_xp[col_gamertag].astype(str).str.strip().str.lower() == gamertag_input.strip().lower()]
 
         if not student_entry.empty:
-            # TREFFER!
+            # Wir haben den Schüler gefunden!
             real_name = student_entry.iloc[0][col_realname]
             
-            # Wir versuchen Level und XP zu finden. 
-            # In deiner Tabelle kommen "Level" und "XP" mehrfach vor (für die Ranglisten rechts).
-            # Wir nehmen einfach die Spalten, die "Level" und "XP" heißen (pandas nimmt automatisch das erste Vorkommen links)
-            level = student_entry.iloc[0].get('Level', 0)
-            xp_total = student_entry.iloc[0].get('XP', 0)
+            # --- DATEN AUSLESEN (LEVEL & XP) ---
+            # Hier fangen wir das "Game Over" Kreuz (†) ab
+            raw_level = student_entry.iloc[0].get('Level', 0)
+            raw_xp = student_entry.iloc[0].get('XP', 0)
             
-            # Falls "Level" leer ist (NaN), machen wir eine 0 draus
-            if pd.isna(level): level = 0
-            if pd.isna(xp_total): xp_total = 0
+            level_num = 0
+            display_level = str(raw_level) # Standard: Zeige an, was in der Zelle steht (z.B. †)
+
+            # Versuch: Ist das Level eine Zahl?
+            try:
+                level_num = int(raw_level)
+                display_level = str(level_num)
+            except:
+                # Wenn es keine Zahl ist (z.B. †), bleibt level_num 0
+                pass
+
+            # Versuch: Sind die XP eine Zahl?
+            xp_num = 0
+            try:
+                xp_num = int(raw_xp)
+            except:
+                pass
 
             st.balloons()
-            st.success(f"Willkommen, {real_name}! (Level {int(level)})")
+            st.success(f"Willkommen, {real_name}!")
             
-            # --- SCHRITT 2: QUESTBUCH LADEN ---
+            # --- DASHBOARD ANZEIGE ---
+            col1, col2 = st.columns(2)
+            col1.metric("Level", display_level) # Zeigt Zahl oder † an
+            col2.metric("XP Total", xp_num)
+            
+            # Fortschrittsbalken (nur wenn Level > 0, also kein Game Over)
+            if level_num > 0:
+                # Beispiel: Fortschritt innerhalb von 1000 XP Schritten
+                progress = min((xp_num % 1000) / 1000, 1.0)
+                st.progress(progress, text="Fortschritt zum nächsten Level")
+            elif "†" in display_level or "Game" in str(display_level):
+                st.error("💀 GAME OVER - Bitte beim Lehrer melden!")
+
+            # --- SCHRITT 2: QUESTS LADEN ---
             try:
-                # header=None, weil wir Zeile 2 und 5 manuell brauchen
+                # Hier nehmen wir KEINEN Header, weil Zeile 2 und 5 wichtig sind
                 df_quests = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None)
             except:
-                st.error(f"Konnte Blatt '{blatt_quests}' nicht finden.")
+                st.warning(f"Konnte Quests ('{blatt_quests}') nicht laden.")
                 st.stop()
 
-            # A. Quest-Struktur verstehen (Zeile 2 = Namen, Zeile 5 = XP)
-            # Python Index startet bei 0 -> Zeile 2 ist Index 1
-            quest_names = df_quests.iloc[1] 
-            quest_xps = df_quests.iloc[4]
+            # Zeilen definieren (Python zählt ab 0)
+            quest_names = df_quests.iloc[1] # Zeile 2
+            quest_xps = df_quests.iloc[4]   # Zeile 5
 
-            # B. Den Schüler im Questbuch suchen (via Echtname)
+            # Wir suchen die Zeile des Schülers im Questbuch (über den echten Namen)
             quest_row_index = -1
             
-            # Wir scannen die ersten 200 Zeilen
-            # Der Name steht im Questbuch in Spalte B (Index 1) -> "Name"
+            # Wir scannen die Zeilen nach dem Namen
             for idx, row in df_quests.iterrows():
-                # Wir vergleichen den gefundenen Realnamen mit dem Namen im Questbuch
-                if str(real_name).lower() in str(row[1]).lower(): # Spalte B prüfen
+                # Wir bauen einen Such-String aus den ersten 3 Spalten der Zeile
+                row_str = " ".join([str(x) for x in row.values[:3]]).lower()
+                if str(real_name).lower() in row_str:
                     quest_row_index = idx
                     break
             
@@ -113,28 +133,28 @@ try:
                 st.divider()
                 st.subheader("Deine Quests")
                 
-                # Layout für Quests
                 cols = st.columns(3)
                 col_counter = 0
                 found_quests = False
                 
-                # Wir starten ab Spalte 3 (D), wo die Quests beginnen
+                # Wir gehen durch alle Spalten ab Spalte D (Index 3)
                 for c in range(3, len(df_quests.columns)):
                     q_name = str(quest_names[c])
-                    val = str(student_quest_row[c]) # Was steht beim Schüler?
+                    val = str(student_quest_row[c])
                     
-                    # Nur wenn es eine echte Quest ist (hat einen Namen)
+                    # Ist es eine gültige Quest? (Name nicht leer)
                     if q_name != "nan" and q_name != "":
-                        # Wenn "Abgeschlossen"
+                        # Ist sie abgeschlossen?
                         if "abgeschlossen" in val.lower() and "nicht" not in val.lower():
                             found_quests = True
                             
-                            # XP Wert holen
+                            # XP Wert holen (falls möglich)
                             try:
                                 xp_val = int(float(str(quest_xps[c])))
                             except:
                                 xp_val = "?"
                             
+                            # Grüne Erfolgs-Box anzeigen
                             with cols[col_counter % 3]:
                                 st.success(f"✅ {q_name}\n\n**+{xp_val} XP**")
                             col_counter += 1
@@ -142,11 +162,11 @@ try:
                 if not found_quests:
                     st.info("Noch keine Quests abgeschlossen.")
             else:
-                st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
+                st.warning("Keine Quests für diesen Namen gefunden.")
 
         else:
-            st.error(f"Gamertag '{gamertag_input}' nicht gefunden.")
+            st.error(f"Gamertag '{gamertag_input}' nicht gefunden. Tippfehler?")
 
 except Exception as e:
-    st.error("Ein Fehler ist aufgetreten:")
+    st.error("Ein kritischer Fehler ist aufgetreten:")
     st.code(str(e))
