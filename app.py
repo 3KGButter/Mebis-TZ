@@ -49,10 +49,16 @@ def clean_number(val):
         return 0
 
 def is_checkbox_checked(val):
-    """Prüft auf Checkboxen (True, WAHR, 1, CHECKED)."""
+    """Prüft extrem tolerant auf Checkbox-Werte (True, 1, WAHR, CHECKED)."""
     if pd.isna(val): return False
+    
+    # 1. Echter Boolean
     if isinstance(val, bool): return val
+    
+    # 2. Zahl (1 = True)
     if isinstance(val, (int, float)): return val >= 1
+    
+    # 3. String
     s = str(val).strip().upper()
     return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
 
@@ -65,13 +71,13 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v22.0 - Dynamic Column Scan")
+    st.caption("v23.0 - Arbeitsprobe Override")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ----------------------------------------------------------------
-    # 1. LOGIN & LEVEL (XP Rechner 3.0)
+    # 1. LOGIN & LEVEL
     # ----------------------------------------------------------------
     try:
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_xp, header=1, ttl=0)
@@ -88,7 +94,6 @@ try:
         found_idx = -1
         stats = None
         
-        # Suche Gamertag ab Spalte L
         start_col = 11
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
@@ -133,7 +138,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Scanner Logik)
+            # 2. QUESTBUCH
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -141,7 +146,7 @@ try:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
 
-            # --- DEFINITIONEN ---
+            # --- HEADERS ---
             header_row = df_q.iloc[1]   # Zeile 2: Namen
             master_xp_row = df_q.iloc[4] # Zeile 5: Soll-XP
             
@@ -180,84 +185,80 @@ try:
 
                 max_cols = len(header_row)
                 
-                # --- DER INTELLIGENTE SCANNER ---
-                # Wir gehen JEDE Spalte durch (Schrittweite 1)
                 for c in range(0, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     q_name_clean = q_name.strip().lower()
                     
-                    # 1. STOP bei CP / Game-Over
-                    if "game-over?" in q_name_clean or q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
+                    # --- 1. STOP LOGIK (Präzise) ---
+                    # Stoppt bei 'cp', 'gesamtsumme' oder 'game-over?' (auch mit Bindestrich)
+                    if q_name_clean == "cp" or "gesamtsumme" in q_name_clean or "game-over?" in q_name_clean or ("game" in q_name_clean and "over" in q_name_clean):
                         break
                     
-                    # 2. ÜBERSPRINGEN wenn leer (Das sind die grauen Spalten!)
+                    # --- 2. FILTER LOGIK ---
                     if q_name == "nan" or not q_name.strip(): continue
+                    if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?"]: continue
+                    if any(s in q_name_clean for s in ["questart", "summe", "total", "gold", "bezeichnung"]): continue
                     
-                    # 3. FILTERN von Meta-Spalten
-                    if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?", "bezeichnung"]: continue
-                    if any(s in q_name_clean for s in ["questart", "summe", "total", "gold"]): continue
-                    
-                    # --- WIR HABEN EINE ECHTE QUEST ---
-                    # Die Struktur ist jetzt:
-                    # Spalte c: Name, Status
-                    # Spalte c+1: XP (egal ob leerer Header oder nicht)
-                    
-                    # Master XP holen (Soll)
+                    # --- 3. DATEN HOLEN ---
                     master_xp = 0
                     try:
-                        # Erst rechts schauen
                         if c+1 < len(master_xp_row):
                             master_xp = clean_number(master_xp_row.iloc[c+1])
-                        # Dann hier schauen
                         if master_xp == 0:
                             master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
-                    # Schüler Daten holen
                     status_raw = None
                     status_text = ""
                     student_xp = 0
                     
-                    # Status aus Spalte c
+                    # Status lesen (Spalte c)
                     try:
                         if c < len(student_row):
                             status_raw = student_row.iloc[c]
                             status_text = str(status_raw).strip().upper()
                     except: pass
                     
-                    # XP aus Spalte c+1 (Rechts daneben)
+                    # XP lesen (Spalte c+1)
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
                     except: pass
 
-                    # --- ENTSCHEIDUNG ---
+                    # --- 4. ENTSCHEIDUNG ---
                     is_completed = False
+                    is_arbeitsprobe = "ARBEITSPROBE" in q_name.upper() or "BOSS" in q_name.upper()
                     
                     # A. Punkte sind da
                     if student_xp > 0:
                         is_completed = True
-                    # B. Text "Abgeschlossen"
+                    # B. Text Check
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
                         is_completed = True
-                    # C. Checkbox (für Arbeitsprobe)
+                    # C. Checkbox Check (Wichtig für Arbeitsprobe!)
                     elif is_checkbox_checked(status_raw):
                         is_completed = True
                     
-                    # --- XP ANZEIGE ---
+                    # --- 5. XP ZUWEISUNG (Der Fix für BrAnt) ---
                     display_xp = student_xp
                     
-                    if display_xp == 0:
-                        # Wenn keine Punkte eingetragen sind, nimm Master XP
+                    # Wenn als fertig erkannt, aber 0 XP -> Fallback nutzen
+                    if is_completed and display_xp == 0:
+                        # Bei Arbeitsprobe zwingend 2500 nehmen
+                        if is_arbeitsprobe:
+                            display_xp = 2500
+                        else:
+                            display_xp = master_xp
+
+                    # Wenn nicht fertig, zeigen wir Master XP als "möglich" an
+                    if not is_completed:
                         display_xp = master_xp
-                        
-                        # Spezial-Fix für Arbeitsprobe (wenn Master=0 und Checkbox=True)
-                        if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
+                        if is_arbeitsprobe and display_xp == 0:
                             display_xp = 2500
 
-                    # --- AUSGABE ---
+                    # --- 6. AUSGABE ---
                     if show_done:
                         if is_completed:
                             found_any = True
@@ -275,12 +276,8 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
-                    # Markiere c als erledigt
+                    # Spalten markieren
                     processed_cols.add(c)
-                    
-                    # WICHTIG: Wir markieren auch c+1 als erledigt, DAMIT es beim nächsten 
-                    # Schleifendurchlauf übersprungen wird (da steht ja kein Name im Header,
-                    # aber sicherheitshalber).
                     processed_cols.add(c+1)
 
                 if not found_any:
