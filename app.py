@@ -51,14 +51,30 @@ def clean_number(val):
 def is_checkbox_checked(val):
     """
     Prüft extrem robust, ob eine Checkbox gesetzt ist.
-    Akzeptiert: True (bool), 'TRUE', 'WAHR', '1', 'CHECKED', 'YES'
+    Akzeptiert: True, 'TRUE', 'WAHR', '1', 'CHECKED', 'YES', oder Zahlen >= 1
     """
     if pd.isna(val): return False
-    if isinstance(val, bool): return val
-    if isinstance(val, (int, float)): return val == 1
     
+    # Boolean Typ
+    if isinstance(val, bool): return val
+    
+    # Zahlen: Wenn 1 oder höher (z.B. 2500), dann True
+    if isinstance(val, (int, float)):
+        return val >= 1
+    
+    # Text-Werte
     s = str(val).strip().upper()
-    return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
+    if s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON", "ABGESCHLOSSEN"]:
+        return True
+        
+    # Versuch, Zahl im Text zu finden (z.B. "2500")
+    try:
+        if float(s.replace(',', '.')) >= 1:
+            return True
+    except:
+        pass
+        
+    return False
 
 # --- VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
@@ -69,7 +85,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v18.0 - Checkbox & Strict Stop")
+    st.caption("v19.0 - Universal Checkbox Logic")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -136,7 +152,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Finale Logik)
+            # 2. QUESTBUCH
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -193,21 +209,18 @@ try:
                     q_name = str(header_row.iloc[c])
                     q_name_clean = q_name.strip().lower()
                     
-                    # --- STOP LOGIK (Aggressiv) ---
-                    # Stoppt bei CP, Gesamtsumme oder IRGENDWAS mit Game und Over
+                    # --- STOP LOGIK ---
                     if q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
                         break
                     if "game" in q_name_clean and "over" in q_name_clean:
                         break
                     
-                    # --- FILTER LOGIK ---
+                    # --- FILTER ---
                     if q_name == "nan" or not q_name.strip(): continue
-                    # Filtert Spalten wie "Quest", "Kachel", "Questart", etc.
                     if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?"]: continue
                     if any(s in q_name_clean for s in ["questart", "summe", "total", "gold", "bezeichnung"]): continue
                     
                     # --- DATEN HOLEN ---
-                    # Master XP (Soll) - Meist rechts (c+1)
                     master_xp = 0
                     try:
                         if c+1 < len(master_xp_row):
@@ -216,37 +229,34 @@ try:
                             master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
-                    # Schüler Daten
                     status_raw = None
                     status_text = ""
                     student_xp = 0
                     
-                    # Safe Read Status (Spalte c)
+                    # Status aus Spalte c
                     try:
                         if c < len(student_row):
                             status_raw = student_row.iloc[c]
                             status_text = str(status_raw).strip().upper()
                     except: pass
                     
-                    # Safe Read XP (Spalte c+1)
+                    # XP aus Spalte c+1
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
                     except: pass
 
-                    # --- ENTSCHEIDUNG: IST ES ERLEDIGT? ---
+                    # --- ENTSCHEIDUNG ---
                     is_completed = False
                     
-                    # A: Echte Punkte (> 0)
-                    if student_xp > 0:
+                    # 1. Checkbox Check (Robust) - WICHTIG FÜR ARBEITSPROBE
+                    if is_checkbox_checked(status_raw):
                         is_completed = True
-                        
-                    # B: Text Check "ABGESCHLOSSEN"
+                    # 2. XP Check
+                    elif student_xp > 0:
+                        is_completed = True
+                    # 3. Text Check
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
-                        is_completed = True
-                        
-                    # C: CHECKBOX Check (Das ist neu und robuster)
-                    elif is_checkbox_checked(status_raw):
                         is_completed = True
                     
                     # --- XP ZUWEISUNG ---
@@ -257,8 +267,10 @@ try:
                     else:
                         display_xp = master_xp
                         
-                        # Spezial: Arbeitsprobe
-                        if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
+                        # Spezial: Arbeitsprobe/Bossgegner (2500 XP erzwingen)
+                        # Sucht nach "ARBEITSPROBE", "PROBE" oder "BOSS" im Namen
+                        is_special = any(x in q_name.upper() for x in ["ARBEITSPROBE", "PROBE", "BOSS"])
+                        if is_special and is_completed and display_xp == 0:
                             display_xp = 2500
 
                     # --- ANZEIGE ---
@@ -279,7 +291,6 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
-                    # Markiere Spalten als erledigt
                     processed_cols.add(c)
                     processed_cols.add(c+1)
 
