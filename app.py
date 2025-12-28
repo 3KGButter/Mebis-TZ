@@ -35,24 +35,30 @@ def calculate_progress(current_xp):
     return progress, f"{int(xp_gained)} / {int(xp_needed)} XP zum nächsten Level"
 
 def clean_number(val):
-    """
-    Macht aus '4349.0' -> 4349.
-    Gibt 0 zurück, wenn leer oder Text.
-    """
+    """Macht aus allem sicher eine Zahl."""
     if pd.isna(val) or str(val).strip() == "":
         return 0
-    
     if isinstance(val, (int, float)):
         return int(val)
-        
     s = str(val).strip()
     if s.endswith(".0"): s = s[:-2]
     s = s.replace('.', '').replace(',', '.')
-    
     try:
         return int(float(s))
     except:
         return 0
+
+def is_checkbox_checked(val):
+    """
+    Prüft extrem robust, ob eine Checkbox gesetzt ist.
+    Akzeptiert: True (bool), 'TRUE', 'WAHR', '1', 'CHECKED', 'YES'
+    """
+    if pd.isna(val): return False
+    if isinstance(val, bool): return val
+    if isinstance(val, (int, float)): return val == 1
+    
+    s = str(val).strip().upper()
+    return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
 
 # --- VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
@@ -63,7 +69,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v17.0 - Final Stop & Start Fix")
+    st.caption("v18.0 - Checkbox & Strict Stop")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -86,25 +92,20 @@ try:
         found_idx = -1
         stats = None
         
-        # Suche ab Spalte L (Index 11)
         start_col = 11
-        
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
             if "Gamertag" in col_header:
                 col_vals = df_xp.iloc[:, col_i].astype(str).str.strip().str.lower()
                 matches = col_vals[col_vals == user_tag].index
-                
                 if not matches.empty:
                     found_idx = matches[0]
                     row = df_xp.iloc[found_idx]
-                    
                     if col_i + 2 < len(df_xp.columns):
                         raw_xp = row.iloc[col_i + 1]
                         raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
                         raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
                         is_go = "†" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
-                        
                         stats = {
                             "xp": clean_number(raw_xp),
                             "level": raw_lvl,
@@ -128,11 +129,9 @@ try:
                 st.error("💀 GAME OVER")
             else:
                 st.success(f"Willkommen, **{gamertag_inp}**!")
-                
                 c1, c2 = st.columns(2)
                 c1.metric("Level", lvl_display)
                 c2.metric("XP Total", stats["xp"])
-                
                 prog, txt = calculate_progress(stats["xp"])
                 st.progress(prog, text=txt)
 
@@ -187,30 +186,28 @@ try:
 
                 max_cols = len(header_row)
                 
-                # LOOP start bei Spalte 0 (um sicher zu gehen)
+                # LOOP über alle Spalten ab 0
                 for c in range(0, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     q_name_clean = q_name.strip().lower()
                     
-                    # --- 1. STOP LOGIK ---
-                    # Hier prüfen wir exakt auf "game-over?" und Variationen
-                    if "game-over?" in q_name_clean or q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
+                    # --- STOP LOGIK (Aggressiv) ---
+                    # Stoppt bei CP, Gesamtsumme oder IRGENDWAS mit Game und Over
+                    if q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
+                        break
+                    if "game" in q_name_clean and "over" in q_name_clean:
                         break
                     
-                    # --- 2. FILTER LOGIK ---
+                    # --- FILTER LOGIK ---
                     if q_name == "nan" or not q_name.strip(): continue
-                    
-                    # Ignoriere Spalten wie "Quest", "Questart" etc.
-                    # "quest" allein in der Liste entfernt die Spalte A ("Quest ")
-                    if q_name_clean in ["quest", "quest "]: continue
-                    
+                    # Filtert Spalten wie "Quest", "Kachel", "Questart", etc.
+                    if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?"]: continue
                     if any(s in q_name_clean for s in ["questart", "summe", "total", "gold", "bezeichnung"]): continue
                     
                     # --- DATEN HOLEN ---
-                    
-                    # Master XP (Soll)
+                    # Master XP (Soll) - Meist rechts (c+1)
                     master_xp = 0
                     try:
                         if c+1 < len(master_xp_row):
@@ -224,34 +221,32 @@ try:
                     status_text = ""
                     student_xp = 0
                     
-                    # Status
+                    # Safe Read Status (Spalte c)
                     try:
                         if c < len(student_row):
                             status_raw = student_row.iloc[c]
                             status_text = str(status_raw).strip().upper()
                     except: pass
                     
-                    # XP
+                    # Safe Read XP (Spalte c+1)
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
                     except: pass
 
-                    # --- ENTSCHEIDUNG ---
+                    # --- ENTSCHEIDUNG: IST ES ERLEDIGT? ---
                     is_completed = False
                     
-                    # A: XP > 0
+                    # A: Echte Punkte (> 0)
                     if student_xp > 0:
                         is_completed = True
                         
-                    # B: Text Check
+                    # B: Text Check "ABGESCHLOSSEN"
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
                         is_completed = True
                         
-                    # C: CHECKBOX Check (inkl. Arbeitsprobe Fix)
-                    elif status_raw is True:
-                        is_completed = True
-                    elif status_text in ["TRUE", "WAHR", "1", "CHECKED", "YES"]:
+                    # C: CHECKBOX Check (Das ist neu und robuster)
+                    elif is_checkbox_checked(status_raw):
                         is_completed = True
                     
                     # --- XP ZUWEISUNG ---
@@ -262,7 +257,7 @@ try:
                     else:
                         display_xp = master_xp
                         
-                        # Arbeitsprobe Fix
+                        # Spezial: Arbeitsprobe
                         if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
                             display_xp = 2500
 
@@ -284,7 +279,7 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
-                    # Spalten markieren
+                    # Markiere Spalten als erledigt
                     processed_cols.add(c)
                     processed_cols.add(c+1)
 
