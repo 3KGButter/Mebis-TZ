@@ -35,20 +35,14 @@ def calculate_progress(current_xp):
     return progress, f"{int(xp_gained)} / {int(xp_needed)} XP zum nächsten Level"
 
 def clean_number(val):
-    """
-    Macht aus '4349.0' -> 4349.
-    Gibt 0 zurück, wenn leer oder Text.
-    """
+    """Macht aus 4349.0 -> 4349 und fängt Fehler ab."""
     if pd.isna(val) or str(val).strip() == "":
         return 0
-    
     if isinstance(val, (int, float)):
         return int(val)
-        
     s = str(val).strip()
     if s.endswith(".0"): s = s[:-2]
     s = s.replace('.', '').replace(',', '.')
-    
     try:
         return int(float(s))
     except:
@@ -63,13 +57,13 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v8.0 - Master XP & Strict Text")
+    st.caption("v9.0 - Safe Header Loop")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     # ----------------------------------------------------------------
-    # 1. LOGIN & XP (XP Rechner 3.0)
+    # 1. LOGIN & LEVEL (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
         df_xp = conn.read(spreadsheet=url, worksheet=blatt_xp, header=1, ttl=0)
@@ -85,10 +79,11 @@ try:
         
         found_idx = -1
         stats = None
+        real_name = "Unbekannt"
         
         # Suche ab Spalte L (Index 11)
         start_col = 11
-        
+        # Wir begrenzen die Suche nicht, falls Spalten hinzugefügt wurden
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
             
@@ -100,10 +95,9 @@ try:
                     found_idx = matches[0]
                     row = df_xp.iloc[found_idx]
                     
-                    if col_i + 1 < len(df_xp.columns):
+                    if col_i + 2 < len(df_xp.columns):
                         raw_xp = row.iloc[col_i + 1]
                         raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
-                        
                         raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
                         is_go = "†" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
                         
@@ -116,9 +110,9 @@ try:
         
         if stats and found_idx != -1:
             try:
+                # Name aus Spalte D (Index 3)
                 real_name = str(df_xp.iloc[found_idx, 3])
-            except:
-                real_name = "Unbekannt"
+            except: pass
 
             lvl_display = str(stats["level"])
             if "†" in lvl_display: lvl_display = "💀"
@@ -131,16 +125,14 @@ try:
             else:
                 st.balloons()
                 st.success(f"Willkommen, **{gamertag_inp}**!")
-                
                 c1, c2 = st.columns(2)
                 c1.metric("Level", lvl_display)
                 c2.metric("XP Total", stats["xp"])
-                
                 prog, txt = calculate_progress(stats["xp"])
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH
+            # 2. QUESTBUCH (Neue Logik)
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -148,24 +140,24 @@ try:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
 
-            # --- HEADER INFOS ---
-            # Zeile 2 (Index 1): Questnamen
+            # --- HEADER UND MASTER DATEN ---
+            # Zeile 2 (Index 1) sind die Questnamen
             header_row = df_q.iloc[1]
-            
-            # Zeile 5 (Index 4): Master XP Werte (Das Soll!)
+            # Zeile 5 (Index 4) sind die Master XP Werte
             master_xp_row = df_q.iloc[4]
             
-            # --- SCHÜLER SUCHE ---
+            # --- SCHÜLERSUCHE ---
             q_row_idx = -1
             search_str = real_name.lower()
             for k in ["11t1", "11t2", "11t3", "11t4"]: search_str = search_str.replace(k.lower(), "")
             parts = [p for p in search_str.split() if len(p) > 2]
             if not parts: parts = [search_str]
             
-            # Suche ab Zeile 5 (Datenbereich)
+            # Wir suchen ab Zeile 5 (Index 4) nach unten
             for i in range(4, len(df_q)):
                 r = df_q.iloc[i]
-                txt = f"{r.iloc[0]} {r.iloc[1]}".lower()
+                # Kombiniere Spalte A-D für die Suche, um sicher zu sein
+                txt = " ".join([str(x) for x in r.iloc[0:4]]).lower()
                 
                 match = True
                 for p in parts:
@@ -186,54 +178,75 @@ try:
                     st.subheader("✅ Erledigte Quests")
                 else:
                     st.subheader("❌ Offene Quests")
-                
+
                 cols = st.columns(3)
                 cnt = 0
                 found_any = False
                 processed_cols = set()
 
-                # Wir laufen IMMER bis zum Ende der Header-Zeile (wichtig für BrAnt)
+                # CRITICAL FIX: Wir nutzen die Länge des Headers, NICHT des Schülers
                 max_cols = len(header_row)
                 
-                # Start bei Spalte D (Index 3). Schrittweite 2 (Spalte C=Name, D=XP, E=Name, F=XP...)
-                for c in range(3, max_cols, 2):
+                for c in range(3, max_cols):
+                    if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
+                    
+                    # Filter
                     if q_name == "nan" or not q_name.strip(): continue
-                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "gold"]): continue
+                    if any(x in q_name.lower() for x in ["summe", "total", "questart", "xp", "gold", "variable"]): continue
                     
-                    # --- DATEN SAMMELN ---
+                    # --- DATEN HOLEN ---
                     
-                    # 1. Master XP holen (aus Zeile 5)
-                    # Die stehen meist in der Spalte rechts daneben (c+1)
+                    # 1. Master XP (Zeile 5) - Wir schauen rechts (c+1) oder hier (c)
                     master_xp = 0
                     try:
                         if c+1 < len(master_xp_row):
                             master_xp = clean_number(master_xp_row.iloc[c+1])
+                        if master_xp == 0:
+                            master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
-                    if master_xp == 0: continue # Keine XP = keine echte Quest
-
-                    # 2. Schüler Status prüfen (Text in Spalte c)
+                    # 2. Schüler Status & XP
+                    # Wir verwenden try/except Blocks für jeden Zugriff, falls die Zeile zu kurz ist
                     status_text = ""
+                    student_xp = 0
+                    
                     try:
-                        # SAFE READ: Prüfen ob Index existiert (wichtig für BrAnt!)
                         if c < len(student_row):
                             status_text = str(student_row.iloc[c]).lower()
-                    except: 
-                        status_text = ""
+                    except: pass
                     
-                    # --- STRICT LOGIC ---
-                    # Nur fertig, wenn "abgeschlossen" im Text UND "nicht" nicht drin ist.
-                    # Leere Zellen ("nan") oder "Nicht abgeschlossen" gelten als offen.
-                    is_completed = "abgeschlossen" in status_text and "nicht" not in status_text
+                    try:
+                        if c+1 < len(student_row):
+                            student_xp = clean_number(student_row.iloc[c+1])
+                    except: pass
+
+                    # --- LOGIK ---
+                    is_completed = False
                     
-                    # ANZEIGE
+                    # A: Text sagt "abgeschlossen" (und nicht "nicht")
+                    if "abgeschlossen" in status_text and "nicht" not in status_text:
+                        is_completed = True
+                    
+                    # B: Schüler hat Punkte (>0)
+                    if student_xp > 0:
+                        is_completed = True
+                        
+                    # Welchen XP Wert zeigen wir an?
+                    display_xp = student_xp if student_xp > 0 else master_xp
+                    
+                    # Markiere benutzte Spalten (damit wir c+1 nicht nochmal als Quest lesen)
+                    # Wir nehmen an, dass XP immer rechts steht, wenn Master XP rechts gefunden wurde
+                    if master_xp > 0 and c+1 < max_cols:
+                         processed_cols.add(c+1)
+
+                    # --- ANZEIGE ---
                     if show_done:
                         if is_completed:
                             found_any = True
                             with cols[cnt % 3]:
-                                st.success(f"**{q_name}**\n\n+{master_xp} XP")
+                                st.success(f"**{q_name}**\n\n+{display_xp} XP")
                             cnt += 1
                     else:
                         if not is_completed:
@@ -241,7 +254,7 @@ try:
                             with cols[cnt % 3]:
                                 st.markdown(f"""
                                 <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
-                                    <strong>{q_name}</strong><br>🔒 {master_xp} XP
+                                    <strong>{q_name}</strong><br>🔒 {display_xp} XP
                                 </div>
                                 """, unsafe_allow_html=True)
                             cnt += 1
@@ -253,7 +266,7 @@ try:
                         st.success("Keine offenen Quests mehr!")
 
             else:
-                st.warning(f"Konnte '{real_name}' im Questbuch nicht finden.")
+                st.warning(f"Konnte Daten für '{real_name}' im Questbuch nicht finden.")
 
         else:
             st.error("Gamertag nicht gefunden.")
