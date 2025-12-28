@@ -63,7 +63,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v14.0 - Final Cut (No CP/Sum)")
+    st.caption("v17.0 - Final Stop & Start Fix")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -127,7 +127,6 @@ try:
             if stats["is_go"]:
                 st.error("💀 GAME OVER")
             else:
-                # Keine Ballons mehr!
                 st.success(f"Willkommen, **{gamertag_inp}**!")
                 
                 c1, c2 = st.columns(2)
@@ -138,7 +137,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Cut Logic & Arbeitsprobe)
+            # 2. QUESTBUCH (Finale Logik)
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -188,30 +187,30 @@ try:
 
                 max_cols = len(header_row)
                 
-                # LOOP start bei Spalte D (Index 3). Schrittweite 1.
-                for c in range(3, max_cols):
+                # LOOP start bei Spalte 0 (um sicher zu gehen)
+                for c in range(0, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     q_name_clean = q_name.strip().lower()
                     
-                    # --- STOP LOGIK ---
-                    # Sobald diese Spalten kommen, brechen wir AB (alles danach wird ignoriert).
-                    stop_keywords = ["gesamtsumme", "gameover", "game over", "cp", "summe xp"]
-                    if any(s in q_name_clean for s in stop_keywords):
-                        break 
+                    # --- 1. STOP LOGIK ---
+                    # Hier prüfen wir exakt auf "game-over?" und Variationen
+                    if "game-over?" in q_name_clean or q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
+                        break
                     
-                    # Wenn Header leer, ist es die "rechte" Spalte der verbundenen Zellen -> Skip
+                    # --- 2. FILTER LOGIK ---
                     if q_name == "nan" or not q_name.strip(): continue
                     
-                    # Ignoriere Summenspalten, falls sie vor dem Stop kommen
-                    if any(x in q_name_clean for x in ["summe", "total", "questart", "gold"]): continue
+                    # Ignoriere Spalten wie "Quest", "Questart" etc.
+                    # "quest" allein in der Liste entfernt die Spalte A ("Quest ")
+                    if q_name_clean in ["quest", "quest "]: continue
                     
-                    # --- WIR HABEN EINE QUEST (Spalte c) ---
-                    # Spalte c:   Questname (Header), Status (Schüler)
-                    # Spalte c+1: Leer (Header),      XP (Schüler)
+                    if any(s in q_name_clean for s in ["questart", "summe", "total", "gold", "bezeichnung"]): continue
                     
-                    # 1. Master XP (Zeile 5, meist Spalte c+1)
+                    # --- DATEN HOLEN ---
+                    
+                    # Master XP (Soll)
                     master_xp = 0
                     try:
                         if c+1 < len(master_xp_row):
@@ -220,17 +219,19 @@ try:
                             master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
-                    # 2. Schüler Daten
+                    # Schüler Daten
+                    status_raw = None
                     status_text = ""
                     student_xp = 0
                     
-                    # Status aus Spalte c
+                    # Status
                     try:
                         if c < len(student_row):
-                            status_text = str(student_row.iloc[c]).strip().upper()
+                            status_raw = student_row.iloc[c]
+                            status_text = str(status_raw).strip().upper()
                     except: pass
                     
-                    # XP aus Spalte c+1
+                    # XP
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
@@ -243,15 +244,17 @@ try:
                     if student_xp > 0:
                         is_completed = True
                         
-                    # B: Text "ABGESCHLOSSEN"
+                    # B: Text Check
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
                         is_completed = True
                         
-                    # C: Checkbox (TRUE/WAHR/1) - Für Arbeitsprobe
-                    elif status_text in ["TRUE", "WAHR", "1", "CHECKED"]:
+                    # C: CHECKBOX Check (inkl. Arbeitsprobe Fix)
+                    elif status_raw is True:
+                        is_completed = True
+                    elif status_text in ["TRUE", "WAHR", "1", "CHECKED", "YES"]:
                         is_completed = True
                     
-                    # --- XP ANZEIGE ---
+                    # --- XP ZUWEISUNG ---
                     display_xp = 0
                     
                     if student_xp > 0:
@@ -259,11 +262,11 @@ try:
                     else:
                         display_xp = master_xp
                         
-                        # Spezial: 1. Arbeitsprobe (Master XP leer + Checkbox)
+                        # Arbeitsprobe Fix
                         if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
                             display_xp = 2500
 
-                    # --- OUTPUT ---
+                    # --- ANZEIGE ---
                     if show_done:
                         if is_completed:
                             found_any = True
@@ -281,7 +284,8 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
-                    # c+1 gehört zu c (XP Spalte), also überspringen
+                    # Spalten markieren
+                    processed_cols.add(c)
                     processed_cols.add(c+1)
 
                 if not found_any:
