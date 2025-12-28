@@ -49,32 +49,12 @@ def clean_number(val):
         return 0
 
 def is_checkbox_checked(val):
-    """
-    Prüft extrem robust, ob eine Checkbox gesetzt ist.
-    Akzeptiert: True, 'TRUE', 'WAHR', '1', 'CHECKED', 'YES', oder Zahlen >= 1
-    """
+    """Prüft auf Checkboxen (True, WAHR, 1, CHECKED)."""
     if pd.isna(val): return False
-    
-    # Boolean Typ
     if isinstance(val, bool): return val
-    
-    # Zahlen: Wenn 1 oder höher (z.B. 2500), dann True
-    if isinstance(val, (int, float)):
-        return val >= 1
-    
-    # Text-Werte
+    if isinstance(val, (int, float)): return val >= 1
     s = str(val).strip().upper()
-    if s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON", "ABGESCHLOSSEN"]:
-        return True
-        
-    # Versuch, Zahl im Text zu finden (z.B. "2500")
-    try:
-        if float(s.replace(',', '.')) >= 1:
-            return True
-    except:
-        pass
-        
-    return False
+    return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
 
 # --- VERBINDUNG ---
 url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
@@ -85,7 +65,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v19.0 - Universal Checkbox Logic")
+    st.caption("v22.0 - Dynamic Column Scan")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -108,6 +88,7 @@ try:
         found_idx = -1
         stats = None
         
+        # Suche Gamertag ab Spalte L
         start_col = 11
         for col_i in range(start_col, len(df_xp.columns)):
             col_header = str(df_xp.columns[col_i]).strip()
@@ -152,7 +133,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH
+            # 2. QUESTBUCH (Scanner Logik)
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -160,8 +141,8 @@ try:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
 
-            # --- HEADERS ---
-            header_row = df_q.iloc[1]   # Zeile 2: Questnamen
+            # --- DEFINITIONEN ---
+            header_row = df_q.iloc[1]   # Zeile 2: Namen
             master_xp_row = df_q.iloc[4] # Zeile 5: Soll-XP
             
             # --- SCHÜLERSUCHE ---
@@ -177,12 +158,9 @@ try:
                 txt = " ".join([str(x) for x in r.iloc[0:4]]).lower()
                 match = True
                 for p in parts:
-                    if p not in txt:
-                        match = False
-                        break
+                    if p not in txt: match = False; break
                 if match:
-                    q_row_idx = i
-                    break
+                    q_row_idx = i; break
             
             if q_row_idx != -1:
                 student_row = df_q.iloc[q_row_idx]
@@ -202,33 +180,42 @@ try:
 
                 max_cols = len(header_row)
                 
-                # LOOP über alle Spalten ab 0
+                # --- DER INTELLIGENTE SCANNER ---
+                # Wir gehen JEDE Spalte durch (Schrittweite 1)
                 for c in range(0, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
                     q_name_clean = q_name.strip().lower()
                     
-                    # --- STOP LOGIK ---
-                    if q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
-                        break
-                    if "game" in q_name_clean and "over" in q_name_clean:
+                    # 1. STOP bei CP / Game-Over
+                    if "game-over?" in q_name_clean or q_name_clean == "cp" or "gesamtsumme" in q_name_clean:
                         break
                     
-                    # --- FILTER ---
+                    # 2. ÜBERSPRINGEN wenn leer (Das sind die grauen Spalten!)
                     if q_name == "nan" or not q_name.strip(): continue
-                    if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?"]: continue
-                    if any(s in q_name_clean for s in ["questart", "summe", "total", "gold", "bezeichnung"]): continue
                     
-                    # --- DATEN HOLEN ---
+                    # 3. FILTERN von Meta-Spalten
+                    if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?", "bezeichnung"]: continue
+                    if any(s in q_name_clean for s in ["questart", "summe", "total", "gold"]): continue
+                    
+                    # --- WIR HABEN EINE ECHTE QUEST ---
+                    # Die Struktur ist jetzt:
+                    # Spalte c: Name, Status
+                    # Spalte c+1: XP (egal ob leerer Header oder nicht)
+                    
+                    # Master XP holen (Soll)
                     master_xp = 0
                     try:
+                        # Erst rechts schauen
                         if c+1 < len(master_xp_row):
                             master_xp = clean_number(master_xp_row.iloc[c+1])
+                        # Dann hier schauen
                         if master_xp == 0:
                             master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
+                    # Schüler Daten holen
                     status_raw = None
                     status_text = ""
                     student_xp = 0
@@ -240,7 +227,7 @@ try:
                             status_text = str(status_raw).strip().upper()
                     except: pass
                     
-                    # XP aus Spalte c+1
+                    # XP aus Spalte c+1 (Rechts daneben)
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
@@ -249,31 +236,28 @@ try:
                     # --- ENTSCHEIDUNG ---
                     is_completed = False
                     
-                    # 1. Checkbox Check (Robust) - WICHTIG FÜR ARBEITSPROBE
-                    if is_checkbox_checked(status_raw):
+                    # A. Punkte sind da
+                    if student_xp > 0:
                         is_completed = True
-                    # 2. XP Check
-                    elif student_xp > 0:
-                        is_completed = True
-                    # 3. Text Check
+                    # B. Text "Abgeschlossen"
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
                         is_completed = True
+                    # C. Checkbox (für Arbeitsprobe)
+                    elif is_checkbox_checked(status_raw):
+                        is_completed = True
                     
-                    # --- XP ZUWEISUNG ---
-                    display_xp = 0
+                    # --- XP ANZEIGE ---
+                    display_xp = student_xp
                     
-                    if student_xp > 0:
-                        display_xp = student_xp
-                    else:
+                    if display_xp == 0:
+                        # Wenn keine Punkte eingetragen sind, nimm Master XP
                         display_xp = master_xp
                         
-                        # Spezial: Arbeitsprobe/Bossgegner (2500 XP erzwingen)
-                        # Sucht nach "ARBEITSPROBE", "PROBE" oder "BOSS" im Namen
-                        is_special = any(x in q_name.upper() for x in ["ARBEITSPROBE", "PROBE", "BOSS"])
-                        if is_special and is_completed and display_xp == 0:
+                        # Spezial-Fix für Arbeitsprobe (wenn Master=0 und Checkbox=True)
+                        if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
                             display_xp = 2500
 
-                    # --- ANZEIGE ---
+                    # --- AUSGABE ---
                     if show_done:
                         if is_completed:
                             found_any = True
@@ -291,7 +275,12 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
+                    # Markiere c als erledigt
                     processed_cols.add(c)
+                    
+                    # WICHTIG: Wir markieren auch c+1 als erledigt, DAMIT es beim nächsten 
+                    # Schleifendurchlauf übersprungen wird (da steht ja kein Name im Header,
+                    # aber sicherheitshalber).
                     processed_cols.add(c+1)
 
                 if not found_any:
