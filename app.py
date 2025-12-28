@@ -63,7 +63,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v13.0 - Merged Header Logic")
+    st.caption("v14.0 - Final Cut (No CP/Sum)")
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
@@ -127,7 +127,7 @@ try:
             if stats["is_go"]:
                 st.error("💀 GAME OVER")
             else:
-                st.balloons()
+                # Keine Ballons mehr!
                 st.success(f"Willkommen, **{gamertag_inp}**!")
                 
                 c1, c2 = st.columns(2)
@@ -138,7 +138,7 @@ try:
                 st.progress(prog, text=txt)
 
             # ----------------------------------------------------------------
-            # 2. QUESTBUCH (Finale Logik)
+            # 2. QUESTBUCH (Cut Logic & Arbeitsprobe)
             # ----------------------------------------------------------------
             try:
                 df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
@@ -188,35 +188,34 @@ try:
 
                 max_cols = len(header_row)
                 
-                # LOOP über alle Spalten, Schrittweite 1
-                # Wir suchen nach Spalten, wo eine Überschrift steht.
+                # LOOP start bei Spalte D (Index 3). Schrittweite 1.
                 for c in range(3, max_cols):
                     if c in processed_cols: continue
                     
                     q_name = str(header_row.iloc[c])
+                    q_name_clean = q_name.strip().lower()
                     
-                    # --- STOP LOGIK (Ignoriert alles ab Gesamtsumme/CP) ---
+                    # --- STOP LOGIK ---
+                    # Sobald diese Spalten kommen, brechen wir AB (alles danach wird ignoriert).
                     stop_keywords = ["gesamtsumme", "gameover", "game over", "cp", "summe xp"]
-                    if any(s == q_name.strip().lower() for s in stop_keywords):
+                    if any(s in q_name_clean for s in stop_keywords):
                         break 
                     
-                    # Wenn Header leer/nan ist, ist es wahrscheinlich die zweite Spalte einer verbundenen Zelle (die XP Spalte).
-                    # Diese überspringen wir, da wir sie beim Hauptnamen mitverarbeiten.
+                    # Wenn Header leer, ist es die "rechte" Spalte der verbundenen Zellen -> Skip
                     if q_name == "nan" or not q_name.strip(): continue
                     
-                    # --- WIR HABEN EINE QUEST GEFUNDEN (in Spalte c) ---
-                    # Die Struktur ist:
+                    # Ignoriere Summenspalten, falls sie vor dem Stop kommen
+                    if any(x in q_name_clean for x in ["summe", "total", "questart", "gold"]): continue
+                    
+                    # --- WIR HABEN EINE QUEST (Spalte c) ---
                     # Spalte c:   Questname (Header), Status (Schüler)
                     # Spalte c+1: Leer (Header),      XP (Schüler)
                     
-                    # --- DATEN HOLEN ---
-                    
-                    # 1. Master XP (Zeile 5, Spalte rechts c+1)
+                    # 1. Master XP (Zeile 5, meist Spalte c+1)
                     master_xp = 0
                     try:
                         if c+1 < len(master_xp_row):
                             master_xp = clean_number(master_xp_row.iloc[c+1])
-                        # Fallback: Manchmal steht Master XP in der ersten Spalte
                         if master_xp == 0:
                             master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
@@ -225,47 +224,46 @@ try:
                     status_text = ""
                     student_xp = 0
                     
-                    # Status lesen (Spalte c)
+                    # Status aus Spalte c
                     try:
                         if c < len(student_row):
                             status_text = str(student_row.iloc[c]).strip().upper()
                     except: pass
                     
-                    # XP lesen (Spalte c+1)
+                    # XP aus Spalte c+1
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
                     except: pass
 
-                    # --- ENTSCHEIDUNG: IST ES ERLEDIGT? ---
+                    # --- ENTSCHEIDUNG ---
                     is_completed = False
                     
-                    # A: Echte Punkte eingetragen (> 0) in Spalte c+1
+                    # A: XP > 0
                     if student_xp > 0:
                         is_completed = True
                         
-                    # B: Text sagt "ABGESCHLOSSEN" in Spalte c
+                    # B: Text "ABGESCHLOSSEN"
                     elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
                         is_completed = True
                         
-                    # C: Checkbox ist aktiv (Wahr / True / 1) in Spalte c
+                    # C: Checkbox (TRUE/WAHR/1) - Für Arbeitsprobe
                     elif status_text in ["TRUE", "WAHR", "1", "CHECKED"]:
                         is_completed = True
                     
-                    # --- XP ZUWEISUNG ---
+                    # --- XP ANZEIGE ---
                     display_xp = 0
                     
                     if student_xp > 0:
                         display_xp = student_xp
                     else:
-                        # Fallback auf Master XP
                         display_xp = master_xp
                         
-                        # Spezialfall: Arbeitsprobe (Master XP oft leer, Checkbox setzt 2500)
+                        # Spezial: 1. Arbeitsprobe (Master XP leer + Checkbox)
                         if "ARBEITSPROBE" in q_name.upper() and is_completed and display_xp == 0:
                             display_xp = 2500
 
-                    # --- ANZEIGE ---
+                    # --- OUTPUT ---
                     if show_done:
                         if is_completed:
                             found_any = True
@@ -283,9 +281,7 @@ try:
                                 """, unsafe_allow_html=True)
                             cnt += 1
                     
-                    # Wir haben Spalte c verarbeitet. Spalte c+1 gehört dazu (XP), also ignorieren wir sie im nächsten Durchlauf,
-                    # falls sie versehentlich als eigene Quest erkannt werden würde (was unwahrscheinlich ist, da Header leer).
-                    processed_cols.add(c)
+                    # c+1 gehört zu c (XP Spalte), also überspringen
                     processed_cols.add(c+1)
 
                 if not found_any:
