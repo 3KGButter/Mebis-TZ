@@ -60,10 +60,11 @@ st.title("🛡️ Questlog")
 
 # Sidebar
 with st.sidebar:
-    st.caption("v4.0 - Clean Edition")
+    st.caption("v4.1 - Debug Edition")
     if st.button("🔄 Aktualisieren", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+    debug_mode = st.checkbox("🔍 Debug-Modus", value=False)
 
 try:
     # Google Sheets Verbindung
@@ -71,43 +72,77 @@ try:
     
     # --- SCHRITT 1: GAMERTAG EINGABE ---
     st.info("👤 Bitte gib deinen Gamertag ein:")
-    gamertag_input = st.text_input("Gamertag:", placeholder="z.B. BrAnt")
+    gamertag_input = st.text_input("Gamertag:", placeholder="z.B. BrAnt, JuBur")
     
     if not gamertag_input:
         st.stop()
     
     gamertag = gamertag_input.strip().lower()
     
-    # --- SCHRITT 2: XP RECHNER LADEN ---
+    # --- SCHRITT 2: XP RECHNER LADEN (OHNE HEADER) ---
     with st.spinner("Lade Spielerdaten..."):
-        df_xp = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=SHEET_XP_RECHNER, ttl=0)
+        df_xp = conn.read(
+            spreadsheet=SPREADSHEET_URL, 
+            worksheet=SHEET_XP_RECHNER,
+            header=None,  # WICHTIG: Keine Header automatisch erkennen
+            ttl=0
+        )
     
-    # Suche Gamertag in Spalte D (Index 3)
-    df_xp['Gamertag_Lower'] = df_xp.iloc[:, 3].astype(str).str.strip().str.lower()
-    player_data = df_xp[df_xp['Gamertag_Lower'] == gamertag]
+    # Debug: Zeige Datenstruktur
+    if debug_mode:
+        st.write("**Debug: XP Rechner Daten (erste 10 Zeilen, Spalten A-G)**")
+        st.dataframe(df_xp.iloc[:10, :7])
     
-    if player_data.empty:
+    # Suche Gamertag - durchsuche ALLE Zeilen ab Zeile 2 (Index 1)
+    player_data = None
+    player_row_idx = None
+    
+    # Durchsuche ab Zeile 2 (da Zeile 1 = Header) in Spalte D (Index 3)
+    for idx in range(1, len(df_xp)):
+        cell_value = str(df_xp.iloc[idx, 3]).strip().lower()  # Spalte D
+        if cell_value == gamertag:
+            player_row_idx = idx
+            player_data = df_xp.iloc[idx]
+            break
+    
+    if debug_mode:
+        st.write(f"**Debug: Suche nach '{gamertag}' in Spalte D**")
+        st.write(f"Gefunden: {player_data is not None} (Zeile: {player_row_idx})")
+    
+    if player_data is None:
         st.error(f"❌ Gamertag '{gamertag_input}' nicht gefunden!")
         st.info("💡 Tipp: Achte auf die richtige Schreibweise (z.B. BrAnt, JuBur)")
+        
+        # Zeige verfügbare Gamertags zur Hilfe
+        with st.expander("🔍 Verfügbare Gamertags anzeigen"):
+            available_tags = []
+            for idx in range(1, min(50, len(df_xp))):  # Prüfe erste 50 Zeilen
+                tag = str(df_xp.iloc[idx, 3]).strip()
+                if tag and tag != "nan" and len(tag) > 2:
+                    available_tags.append(tag)
+            
+            if available_tags:
+                st.write(", ".join(sorted(set(available_tags))))
         st.stop()
     
-    # Spielerdaten extrahieren
-    player_row = player_data.iloc[0]
-    player_name = str(player_row.iloc[2])  # Spalte C = Name
-    player_xp = safe_int(player_row.iloc[4])  # Spalte E = XP
-    player_level_raw = player_row.iloc[5]  # Spalte F = Level
-    player_stufe = str(player_row.iloc[6])  # Spalte G = Stufe
+    # Spielerdaten extrahieren (Spalten: A=Vorname, B=Nachname, C=Klasse, D=Gamertag, E=XP, F=Level, G=Stufe)
+    player_vorname = str(player_data.iloc[0])
+    player_nachname = str(player_data.iloc[1])
+    player_name = f"{player_vorname} {player_nachname}"
+    player_klasse = str(player_data.iloc[2])
+    player_xp = safe_int(player_data.iloc[4])  # Spalte E
+    player_level_raw = player_data.iloc[5]  # Spalte F
+    player_stufe = str(player_data.iloc[6]) if len(player_data) > 6 else ""  # Spalte G
     
     # Game Over Check
     is_game_over = "💀" in str(player_level_raw) or "game over" in player_stufe.lower()
     
-    # Level anzeigen
     if is_game_over:
         st.error("💀 GAME OVER")
         st.stop()
     
     # Erfolgreicher Login
-    st.success(f"Willkommen, **{gamertag_input}**! ({player_name})")
+    st.success(f"Willkommen, **{gamertag_input}**!")
     
     # XP & Level Anzeige
     level, progress, progress_text = calculate_level_progress(player_xp)
@@ -118,30 +153,46 @@ try:
     with col2:
         st.metric("XP", player_xp)
     with col3:
-        st.metric("Stufe", player_stufe)
+        st.metric("Klasse", player_klasse)
     
     st.progress(progress, text=progress_text)
+    
+    if debug_mode:
+        st.write(f"**Debug: Spielerdaten**")
+        st.write(f"Name: {player_name}, Zeile: {player_row_idx}")
     
     # --- SCHRITT 3: QUESTBUCH LADEN ---
     st.divider()
     
     with st.spinner("Lade Quests..."):
-        df_quests = conn.read(spreadsheet=SPREADSHEET_URL, worksheet=SHEET_QUESTBUCH, ttl=0)
+        df_quests = conn.read(
+            spreadsheet=SPREADSHEET_URL, 
+            worksheet=SHEET_QUESTBUCH,
+            header=None,
+            ttl=0
+        )
     
-    # Quest-Namen (Zeile 2 = Index 1)
+    if debug_mode:
+        st.write("**Debug: Questbuch Daten (erste 10 Zeilen, 10 Spalten)**")
+        st.dataframe(df_quests.iloc[:10, :10])
+    
+    # Quest-Namen (Zeile 2 = Index 1) und XP (Zeile 5 = Index 4)
     quest_names = df_quests.iloc[1, 2:].tolist()  # Ab Spalte C
-    # XP-Werte (Zeile 5 = Index 4)
     quest_xp_values = df_quests.iloc[4, 2:].tolist()  # Ab Spalte C
     
-    # Suche Schüler im Questbuch (ab Zeile 7 = Index 6)
-    name_parts = [part for part in player_name.lower().split() if len(part) > 2]
+    # Suche Schüler im Questbuch (ab Zeile 7 = Index 6, in Spalte B = Name)
     student_row_idx = None
+    search_lastname = player_nachname.lower()
     
     for idx in range(6, len(df_quests)):
-        row_text = " ".join([str(x) for x in df_quests.iloc[idx, 0:4]]).lower()
-        if all(part in row_text for part in name_parts):
+        name_cell = str(df_quests.iloc[idx, 1]).lower()  # Spalte B = Name
+        if search_lastname in name_cell:
             student_row_idx = idx
             break
+    
+    if debug_mode:
+        st.write(f"**Debug: Questbuch - Suche nach '{search_lastname}'**")
+        st.write(f"Gefunden in Zeile: {student_row_idx}")
     
     if student_row_idx is None:
         st.warning(f"⚠️ Keine Quest-Daten für '{player_name}' gefunden.")
@@ -173,7 +224,7 @@ try:
             break
         
         # Überspringe System-Spalten
-        if quest_name_clean.lower() in ["quest", "kachel", "code"]:
+        if quest_name_clean.lower() in ["quest", "kachel", "code", "quest-art"]:
             continue
         
         # Hole Student-Daten
@@ -182,8 +233,14 @@ try:
             is_completed = is_quest_completed(student_value)
             earned_xp = safe_int(student_value)
             
-            # XP Logik
-            display_xp = earned_xp if earned_xp > 0 else safe_int(master_xp)
+            # XP Logik: Wenn abgeschlossen aber 0 XP, nutze Master-XP
+            if is_completed and earned_xp == 0:
+                display_xp = safe_int(master_xp)
+            else:
+                display_xp = earned_xp if earned_xp > 0 else safe_int(master_xp)
+            
+            if display_xp == 0:  # Überspringe Quests ohne XP
+                continue
             
             quest_data = {
                 "name": quest_name_clean,
@@ -221,4 +278,6 @@ try:
 
 except Exception as e:
     st.error(f"❌ Fehler beim Laden der Daten: {e}")
+    if debug_mode:
+        st.exception(e)
     st.info("💡 Bitte Verbindung prüfen oder Admin kontaktieren.")
