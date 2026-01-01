@@ -3,8 +3,8 @@ import pandas as pd
 from streamlit_gsheets import GSheetsConnection
 
 # --- KONFIGURATION ---
-st.set_page_config(page_title="Questlog", page_icon="ðŸ›¡ï¸", layout="centered")
-st.title("ðŸ›¡ï¸ Questlog")
+st.set_page_config(page_title="Questlog", page_icon="🛡️", layout="centered")
+st.title("🛡️ Questlog")
 
 # Level-Tabelle
 LEVEL_THRESHOLDS = {
@@ -62,7 +62,7 @@ blatt_xp = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
 with st.sidebar:
-    if st.button("ðŸ”„ Aktualisieren"):
+    if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
     st.caption("v30.0 - Final Logic (C=Name/Status, C+1=XP)")
@@ -119,7 +119,7 @@ try:
                         }
                     break
         
-        if stats and found_idx != -1:
+            if stats and found_idx != -1:
             try:
                 real_name = str(df_xp.iloc[found_idx, 3])
             except:
@@ -132,9 +132,9 @@ try:
                 except: pass
 
             if stats["is_go"]:
-                st.error("ðŸ’€ GAME OVER")
+                st.error("💀 GAME OVER")
             else:
-                st.success(f"Willkommen, **{gamertag_inp}**!")
+                st.success(f"Willkommen, Abenteurer \"{gamertag_inp}\"!")
                 c1, c2 = st.columns(2)
                 c1.metric("Level", lvl_display)
                 c2.metric("XP Total", stats["xp"])
