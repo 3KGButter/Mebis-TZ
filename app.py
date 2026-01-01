@@ -275,23 +275,22 @@ try:
                         display_xp = master_xp
 
                     # --- AUSGABE ---
-                    if display_xp > 0: 
-                        if show_done:
-                            if is_completed:
-                                found_any = True
-                                with cols[cnt % 3]:
-                                    st.success(f"**{q_name}**\n\n+{display_xp} XP")
-                                cnt += 1
-                        else:
-                            if not is_completed:
-                                found_any = True
-                                with cols[cnt % 3]:
-                                    st.markdown(f"""
-                                    <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
-                                        <strong>{q_name}</strong><br>ðŸ”’ {display_xp} XP
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                cnt += 1
+                    # Zeige Quests auch wenn XP == 0.
+                    quest_entry = {"name": q_name, "xp": display_xp, "completed": is_completed}
+                    if is_completed:
+                        found_any = True
+                        with cols[cnt % 3]:
+                            st.success(f"**{q_name}**\n\n+{display_xp} XP")
+                        cnt += 1
+                    else:
+                        found_any = True
+                        with cols[cnt % 3]:
+                            st.markdown(f"""
+                            <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
+                                <strong>{q_name}</strong><br>🔒 {display_xp} XP
+                            </div>
+                            """, unsafe_allow_html=True)
+                        cnt += 1
                     
                     # Spalte C verarbeitet. C+1 (XP) Ã¼berspringen wir explizit.
                     processed_cols.add(c)
