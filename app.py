@@ -199,6 +199,10 @@ try:
                 found_any = False
                 processed_cols = set()
 
+                # Collect quests first, then render according to `show_done`.
+                completed_quests = []
+                open_quests = []
+
                 max_cols = len(header_row)
                 
                 # --- QUEST LOOP ---
@@ -261,33 +265,39 @@ try:
                     if not is_completed and display_xp == 0:
                         display_xp = master_xp
 
-                    # --- AUSGABE ---
-                    # Zeige Quests auch wenn XP == 0.
+                    # --- AUSGABE (Sammeln) ---
                     quest_entry = {"name": q_name, "xp": display_xp, "completed": is_completed}
                     if is_completed:
-                        found_any = True
-                        with cols[cnt % 3]:
-                            st.success(f"**{q_name}**\n\n+{display_xp} XP")
-                        cnt += 1
+                        completed_quests.append(quest_entry)
                     else:
-                        found_any = True
-                        with cols[cnt % 3]:
-                            st.markdown(f"""
-                            <div style="border:1px solid #ddd; padding:10px; border-radius:5px; opacity:0.6;">
-                                <strong>{q_name}</strong><br>🔒 {display_xp} XP
-                            </div>
-                            """, unsafe_allow_html=True)
-                        cnt += 1
+                        open_quests.append(quest_entry)
                     
                     # Spalte C verarbeitet. C+1 (XP) Ã¼berspringen wir explizit.
                     processed_cols.add(c)
                     processed_cols.add(c+1)
 
-                if not found_any:
+                # Wähle die passende Liste zum Anzeigen
+                quests_to_show = completed_quests if show_done else open_quests
+
+                if not quests_to_show:
                     if show_done:
                         st.info("Noch keine Quests erledigt.")
                     else:
                         st.success("Keine offenen Quests mehr!")
+                else:
+                    cols = st.columns(3)
+                    for idx, quest in enumerate(quests_to_show):
+                        with cols[idx % 3]:
+                            if quest["completed"]:
+                                st.success(f"**{quest['name']}**\n\n✨ +{quest['xp']} XP")
+                            else:
+                                st.markdown(f"""
+                                <div style="border:2px solid #444; padding:15px; border-radius:10px; 
+                                            background-color:#1a1a1a; opacity:0.7;">
+                                    <strong>{quest['name']}</strong><br>
+                                    🔒 {quest['xp']} XP
+                                </div>
+                                """, unsafe_allow_html=True)
 
             else:
                 st.warning(f"Konnte Daten fÃ¼r '{real_name}' im Questbuch nicht finden.")
