@@ -32,7 +32,7 @@ def calculate_progress(current_xp):
     if xp_needed <= 0: return 1.0, "Level Up!"
     
     progress = max(0.0, min(1.0, xp_gained / xp_needed))
-    return progress, f"{int(xp_gained)} / {int(xp_needed)} XP zum nÃ¤chsten Level"
+    return progress, f"{int(xp_gained)} / {int(xp_needed)} XP zum nächsten Level"
 
 def clean_number(val):
     """Macht aus allem sicher eine Zahl."""
@@ -188,12 +188,10 @@ try:
                 student_row = df_q.iloc[q_row_idx]
                 
                 st.divider()
-                show_done = st.checkbox("✅ Erledigte anzeigen", value=True, key="show_done")
+                quest_view = st.radio("", options=["⌛ Offene Quests", "✅ Erledigte Quests"], horizontal=True, key="quest_view")
+                show_done = quest_view == "✅ Erledigte Quests"
                 
-                if show_done:
-                    st.subheader("âœ… Erledigte Quests")
-                else:
-                    st.subheader("âŒ Offene Quests")
+                st.subheader(quest_view)
 
                 cnt = 0
                 found_any = False
@@ -297,8 +295,8 @@ try:
                                 st.success(f"**{quest['name']}**\n\n✨ +{quest['xp']} XP")
                             else:
                                 st.markdown(f"""
-                                <div style="border:2px solid #444; padding:15px; border-radius:10px; 
-                                            background-color:#1a1a1a; opacity:0.7;">
+                                <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
+                                            background-color:#f5f5f5; color:#333;">
                                     <strong>{quest['name']}</strong><br>
                                     🔒 {quest['xp']} XP
                                 </div>
