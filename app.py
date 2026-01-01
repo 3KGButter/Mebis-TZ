@@ -5,29 +5,40 @@ from streamlit_gsheets import GSheetsConnection
 # --- KONFIGURATION ---
 st.set_page_config(page_title="FOS Tech Zeichnen - Questlog", page_icon="🛡️", layout="centered")
 
-# CSS für etwas schönere Optik (optional)
+# CSS für schönere Progress-Bars und Karten
 st.markdown("""
     <style>
     .stProgress > div > div > div > div {
         background-color: #4CAF50;
     }
-    .big-font {
-        font-size:20px !important;
+    .quest-card {
+        background-color: #262730;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #4a4a4a;
+        margin-bottom: 10px;
+    }
+    .xp-badge {
+        background-color: #FFC107;
+        color: black;
+        padding: 2px 8px;
+        border-radius: 5px;
         font-weight: bold;
+        float: right;
     }
     </style>
     """, unsafe_allow_html=True)
 
 st.title("🛡️ Dein Questlog")
 
-# Level-Logik basierend auf deiner CSV (XP Summiert Spalte)
+# Level-Logik (aus deiner Tabelle übernommen)
 LEVEL_THRESHOLDS = {
     1: 0, 2: 42, 3: 143, 4: 332, 5: 640, 6: 1096, 7: 1728, 8: 2567,
     9: 3640, 10: 4976, 11: 6602, 12: 8545, 13: 10831, 14: 13486, 15: 16536, 16: 20003
 }
 
 def get_level_info(current_xp):
-    """Berechnet Level und Fortschritt zum nächsten Level."""
+    """Berechnet Level und Fortschritt."""
     current_level = 1
     for lvl, threshold in LEVEL_THRESHOLDS.items():
         if current_xp >= threshold:
@@ -44,223 +55,172 @@ def get_level_info(current_xp):
     needed = xp_next - xp_start
     gained = current_xp - xp_start
     
+    # Schutz vor Division durch Null
+    if needed <= 0: return current_level, 1.0, 0, 0, "Level Up!"
+
     progress = max(0.0, min(1.0, gained / needed))
     return current_level, progress, int(gained), int(needed), f"{int(gained)} / {int(needed)} XP zum nächsten Level"
 
 def clean_xp_value(val):
-    """Hilft, XP Zahlen aus dem Excel sauber zu lesen."""
-    if pd.isna(val): return 0
+    """Macht aus Excel-Daten saubere Integers."""
+    if pd.isna(val) or str(val).strip() == "":
+        return 0
     try:
-        # Falls es ein String ist, Komma zu Punkt etc.
-        if isinstance(val, str):
-            val = val.replace(',', '.').strip()
-            if val == "": return 0
-        return int(float(val))
+        # Kommas entfernen/ersetzen falls String
+        s = str(val).replace(',', '.').strip()
+        return int(float(s))
     except:
         return 0
 
 # --- SIDEBAR ---
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg", width=50) # Platzhalter Logo
     st.write("### Tech Zeichnen FOS")
     if st.button("🔄 Daten aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.info("Logge dich mit deinem Gamertag ein, um deinen Fortschritt zu sehen.")
+    st.info("Gib deinen Gamertag ein, um deinen aktuellen Stand zu prüfen.")
 
 # --- DATEN LADEN ---
-# URL zu deinem Google Sheet
 URL = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
 
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-    
-    # 1. Lade XP Rechner (für Login & Gesamt-XP)
-    df_xp_rechner = conn.read(spreadsheet=URL, worksheet="XP Rechner 3.0", header=9) # Header scheint in Zeile 10 zu sein (Index 9)
-    
-    # 2. Lade Questbuch (für Details)
-    # Wir laden ohne Header, um Zeilen manuell zu parsen
+    # Wir laden beide Blätter komplett ohne Header, um flexibel zu bleiben
+    df_xp_rechner = conn.read(spreadsheet=URL, worksheet="XP Rechner 3.0", header=None)
     df_questbuch = conn.read(spreadsheet=URL, worksheet="Questbuch 4.0", header=None)
-
 except Exception as e:
-    st.error(f"Fehler bei der Verbindung zu Google Sheets: {e}")
+    st.error(f"Verbindungsfehler: {e}")
     st.stop()
 
-# --- LOGIN BEREICH ---
+# --- LOGIN ---
 gamertag_input = st.text_input("Dein Gamertag:", placeholder="z.B. BrAnt").strip()
 
 if gamertag_input:
-    # Suche im XP Rechner nach dem Gamertag
-    # Strategie: Wir suchen im gesamten DataFrame nach dem String
     found_user = False
-    user_data = {}
+    xp_total = 0
+    real_name = ""
     
-    # Wir suchen erst in der Hauptliste (Spalten A-E ca.)
-    # Spalte 'Gamertag ' (mit Leerzeichen im CSV Header beachten)
-    # Wir bereinigen erst die Spaltennamen
-    df_xp_rechner.columns = [str(c).strip() for c in df_xp_rechner.columns]
-    
-    if "Gamertag" in df_xp_rechner.columns:
-        # Suche in der Hauptspalte
-        match = df_xp_rechner[df_xp_rechner["Gamertag"].astype(str).str.lower() == gamertag_input.lower()]
-        if not match.empty:
-            # Volltreffer in der Hauptliste
-            row = match.iloc[0]
-            # Name zusammenbauen für Questbuch Suche
-            real_name = str(row.get("Klasse + Name (gedreht für Vergleich Mebis-Daten)", ""))
-            # Falls das leer ist, versuchen wir Vorname + Nachname
-            if not real_name or real_name == "nan":
-                 real_name = f"{row.get('Vorname', '')} {row.get('Nachname', '')}"
-            
-            # Jetzt brauchen wir die XP. Im CSV Snippet war die XP Spalte in der Hauptliste leer oder hieß "XP Bereich"
-            # Wir suchen daher den Gamertag nochmal in den Ranglisten rechts, da stehen die XP sicher.
-            found_user = True
-    
-    # Fallback / XP Suche in den Ranglisten (ab Spalte K/10)
-    # Wir iterieren über alle Zellen. Wenn Zelle == Gamertag, dann ist Zelle rechts davon = XP
-    xp_found = 0
-    level_found = 1
-    
-    # Wir wandeln alles in Strings und Lowercase für die Suche
+    # --- SUCHE IM XP RECHNER ---
+    # Wir suchen den Gamertag überall im Blatt
+    # Umwandlung in Strings und Kleinschreibung für Suche
     mask = df_xp_rechner.apply(lambda x: x.astype(str).str.strip().str.lower() == gamertag_input.lower())
-    coords = list(zip(*mask.to_numpy().nonzero())) # Findet (row, col) Koordinaten
+    coords = list(zip(*mask.to_numpy().nonzero()))
     
     if coords:
         found_user = True
-        # Nimm den ersten Treffer (meistens am aktuellsten oder links)
+        # Nimm den ersten Treffer
         r_idx, c_idx = coords[0]
         
-        # Versuche Namen zu finden (in der gleichen Zeile ganz links, Spalte D/3)
-        # Das ist eine Annahme, dass die Zeilenstruktur konsistent ist
+        # 1. VERSUCH: XP finden (Zelle rechts vom Gamertag)
         try:
-            potential_name = df_xp_rechner.iloc[r_idx, 3] # Spalte 3 ist "Klasse + Name"
-            if str(potential_name) != "nan":
-                real_name = potential_name
+            xp_total = clean_xp_value(df_xp_rechner.iloc[r_idx, c_idx + 1])
         except:
-            pass # Name schon oben gesetzt hoffentlich
+            xp_total = 0
             
-        # Versuche XP zu finden (Spalte rechts vom Gamertag)
+        # 2. VERSUCH: Echten Namen finden (für Questbuch)
+        # Wir gehen davon aus, dass der Name in derselben Zeile weiter links steht (Spalte D/E meistens)
+        # Im "XP Rechner" Blatt ist Spalte D (Index 3) oft "Klasse + Name"
         try:
-            raw_xp = df_xp_rechner.iloc[r_idx, c_idx + 1]
-            xp_found = clean_xp_value(raw_xp)
+            # Wir schauen in Zeile r_idx, Spalte 3 (D)
+            potential_name = df_xp_rechner.iloc[r_idx, 3]
+            if pd.notna(potential_name):
+                real_name = str(potential_name)
         except:
-            xp_found = 0
+            pass
             
     if found_user:
-        st.success(f"Willkommen zurück, **{gamertag_input}**!")
+        lvl, prog, gain, need, prog_txt = get_level_info(xp_total)
         
-        # Level Berechnung
-        lvl, prog, gain, need, prog_text = get_level_info(xp_found)
-        
-        # --- DASHBOARD ---
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Level", f"{lvl}")
-        col2.metric("XP Gesamt", f"{xp_found}")
-        col3.metric("Nächstes Level", f"{need} XP nötig")
-        
-        st.write(f"**Fortschritt:** {prog_text}")
-        st.progress(prog)
-        
+        # Header Bereich
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            st.metric("Level", lvl)
+        with c2:
+            st.metric("XP Gesamt", xp_total)
+            st.progress(prog, text=prog_txt)
+
         if lvl >= 16:
             st.balloons()
 
-        # --- QUESTBUCH ANALYSE ---
+        # --- QUESTBUCH MATCHING ---
         st.divider()
-        st.subheader("📜 Dein Questbuch")
+        st.subheader("📜 Quest-Log")
         
-        # Wir müssen den Schüler im Questbuch Blatt finden
-        # Zeile 2 (Index 1) sind die Questnamen
-        # Zeile 5 (Index 4) sind die Max XP
-        # Ab Zeile 7 (Index 6) sind die Schüler
-        
-        q_header = df_questbuch.iloc[1]
-        q_max_xp = df_questbuch.iloc[4]
-        
-        # Suche nach dem Namen in Spalte A oder B (Index 0 oder 1)
-        # Wir suchen "Vorname Nachname" oder Teile davon
-        student_row_idx = -1
-        
-        # Bereinige den Suchnamen
-        search_name = str(real_name).lower().replace(",", "").replace("  ", " ")
-        name_parts = search_name.split()
-        
-        # Suche ab Zeile 7
-        for idx in range(6, len(df_questbuch)):
-            row_str = " ".join([str(x) for x in df_questbuch.iloc[idx, 0:5]]).lower() # Check die ersten paar Spalten
-            # Prüfe ob alle Namensteile (z.B. "Antonia", "Brummer") in der Zeile vorkommen
-            if all(part in row_str for part in name_parts):
-                student_row_idx = idx
-                break
-        
-        if student_row_idx != -1:
-            student_data = df_questbuch.iloc[student_row_idx]
-            
-            quests_open = []
-            quests_done = []
-            
-            # Wir iterieren durch die Spalten.
-            # Struktur scheint zu sein: Spalte I = Quest Name, Spalte I = Status, Spalte I+1 = Erhaltene XP
-            # Aber im CSV Snippet: Questname steht im Header (Zeile 2).
-            # Daten: Status | XP | Status | XP
-            
-            num_cols = len(q_header)
-            # Wir starten ab Spalte 2 (Index 2), da links Namen stehen
-            # Wir gehen in 2er Schritten: i (Status), i+1 (XP)
-            
-            for i in range(2, num_cols - 1, 2):
-                q_name = str(q_header[i]).strip()
-                
-                # Filter ungültige Spalten
-                if q_name == "nan" or q_name == "" or "Summe" in q_name:
-                    continue
-                
-                # Daten lesen
-                status = str(student_data[i]).strip().upper()
-                try:
-                    xp_got = clean_xp_value(student_data[i+1])
-                except:
-                    xp_got = 0
-                
-                try:
-                    xp_max = clean_xp_value(q_max_xp[i+1]) # XP Max steht meist über der XP Spalte
-                    if xp_max == 0: xp_max = clean_xp_value(q_max_xp[i]) # Oder über der Status Spalte?
-                except:
-                    xp_max = 0
-
-                # Status prüfen
-                is_finished = False
-                if "ABGESCHLOSSEN" in status: is_finished = True
-                if xp_got > 0: is_finished = True
-                if status == "TRUE": is_finished = True
-                
-                quest_obj = {
-                    "name": q_name,
-                    "xp": xp_got if is_finished else xp_max,
-                    "status": status
-                }
-                
-                if is_finished:
-                    quests_done.append(quest_obj)
-                else:
-                    quests_open.append(quest_obj)
-            
-            # --- ANZEIGE TABS ---
-            tab1, tab2 = st.tabs([f"Offene Quests ({len(quests_open)})", f"Erledigt ({len(quests_done)})"])
-            
-            with tab1:
-                if not quests_open:
-                    st.success("Alles erledigt! Wahnsinn! 🎉")
-                else:
-                    for q in quests_open:
-                        st.warning(f"**{q['name']}**\n\nBelohnung: {q['xp']} XP")
-            
-            with tab2:
-                for q in quests_done:
-                    st.success(f"**{q['name']}**\n\n+{q['xp']} XP erhalten")
-                    
+        if not real_name:
+            st.warning("Konnte deinen echten Namen nicht zuordnen, daher keine Quest-Details möglich.")
         else:
-            st.warning(f"Konnte keine Quest-Daten für '{real_name}' finden. Bitte prüfe, ob dein Name im Questbuch korrekt steht.")
+            # Suche Schüler im Questbuch (ab Zeile 7 / Index 6)
+            q_header_row = df_questbuch.iloc[1]  # Zeile 2: Namen der Quests
+            q_max_xp_row = df_questbuch.iloc[4]  # Zeile 5: Max XP
+            
+            student_row = None
+            
+            # Namenssuche Logik: Wir zerlegen den gefundenen Namen und suchen Matches
+            search_parts = real_name.lower().replace(",", "").split()
+            
+            for idx in range(6, len(df_questbuch)):
+                # Prüfe die ersten 5 Spalten jeder Zeile auf Namensübereinstimmung
+                row_str = " ".join([str(x) for x in df_questbuch.iloc[idx, 0:5]]).lower()
+                if all(part in row_str for part in search_parts if len(part) > 2): # >2 ignoriert kurze Kürzel
+                    student_row = df_questbuch.iloc[idx]
+                    break
+            
+            if student_row is not None:
+                quests_open = []
+                quests_done = []
+                
+                # Wir gehen durch die Spalten. Start ab Spalte 2 (C). 
+                # Muster: Spalte i = Status, Spalte i+1 = XP
+                num_cols = len(q_header_row)
+                
+                for i in range(2, num_cols - 1, 2):
+                    q_name = str(q_header_row[i]).strip()
+                    
+                    # Filter: Leere Spalten oder Summenspalten überspringen
+                    if q_name == "nan" or not q_name or "Summe" in q_name or "Quest" in q_name:
+                        continue
+                        
+                    # Daten holen
+                    try:
+                        xp_got = clean_xp_value(student_row[i+1]) # Die echten Punkte des Schülers
+                    except: xp_got = 0
+                    
+                    try:
+                        # Max XP steht in Zeile 5 (Index 4), meist in der XP Spalte (i+1)
+                        xp_max = clean_xp_value(q_max_xp_row[i+1])
+                    except: xp_max = 0
+                    
+                    # --- ENTSCHEIDUNGSLOGIK ---
+                    # Nur wenn XP > 0 sind, gilt es als erledigt.
+                    if xp_got > 0:
+                        quests_done.append((q_name, xp_got))
+                    else:
+                        # Quest ist offen (oder hat 0 Punkte gegeben)
+                        # Wir zeigen Max XP an, damit der Schüler weiß, was es zu holen gibt
+                        quests_open.append((q_name, xp_max))
 
+                # --- ANZEIGE ---
+                t_open, t_done = st.tabs([f"Offen ({len(quests_open)})", f"Erledigt ({len(quests_done)})"])
+                
+                with t_open:
+                    if not quests_open:
+                        st.balloons()
+                        st.success("Keine offenen Quests mehr! Super!")
+                    else:
+                        for name, max_p in quests_open:
+                            # HTML Card für Optik
+                            st.markdown(f"""
+                            <div class="quest-card">
+                                <strong>{name}</strong>
+                                <span class="xp-badge">Möglich: {max_p} XP</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                with t_done:
+                    for name, got_p in quests_done:
+                        st.success(f"✅ **{name}** (+{got_p} XP)")
+
+            else:
+                st.warning(f"Konnte Daten für '{real_name}' im Questbuch nicht finden.")
     else:
-        st.error("Gamertag nicht gefunden. Tippfehler?")
-        st.caption("Tipp: Achte auf Groß-/Kleinschreibung, auch wenn ich versuche das zu ignorieren.")
+        st.error("Gamertag nicht gefunden.")
