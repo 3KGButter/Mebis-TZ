@@ -119,14 +119,14 @@ try:
                         }
                     break
         
-            if stats and found_idx != -1:
+        if stats and found_idx != -1:
             try:
                 real_name = str(df_xp.iloc[found_idx, 3])
             except:
                 real_name = "Unbekannt"
 
             lvl_display = str(stats["level"])
-            if "â€ " in lvl_display: lvl_display = "ðŸ’€"
+            if "â€ " in lvl_display: lvl_display = "💀"
             else:
                 try: lvl_display = str(int(float(str(lvl_display).replace(',','.'))))
                 except: pass
