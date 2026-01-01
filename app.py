@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from streamlit_gsheets import GSheetsConnection
+import shop
 
 # --- KONFIGURATION ---
 st.set_page_config(page_title="Questlog", page_icon="🛡️", layout="centered")
@@ -142,6 +143,10 @@ try:
                 prog = max(0.0, min(prog, 1.0))
                 st.progress(prog)
                 st.write(txt)
+
+                # Kleiner Shop-Demo: öffnet das Shop-Modul (Demo, speichert Gold/Inventar in session_state)
+                if st.button("🛒 Zum Shop"):
+                    shop.show_shop(gamertag_inp, stats)
 
             # ----------------------------------------------------------------
             # 2. QUESTBUCH
