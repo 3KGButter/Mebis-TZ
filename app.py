@@ -251,26 +251,13 @@ try:
                     # 1. Punkte > 0
                     if student_xp > 0:
                         is_completed = True
-                        
-                    # 2. Text "ABGESCHLOSSEN" (Spalte C)
-                    elif "ABGESCHLOSSEN" in status_text and "NICHT" not in status_text:
-                        is_completed = True
-                        
-                    # 3. Checkbox (Spalte C)
-                    elif is_checkbox_checked(status_raw):
-                        is_completed = True
+                    # Strict rule: only numeric XP > 0 marks completion.
+                    # Previously text/checkbox could mark completion even if XP == 0.
                     
                     # --- XP ANZEIGE ---
                     display_xp = student_xp
-                    
-                    # Wenn 0 Punkte, aber fertig (Checkbox/Text) -> Master XP nutzen
-                    if is_completed and display_xp == 0:
-                        display_xp = master_xp
-                        # Fallback fÃ¼r Arbeitsprobe (wenn Master auch 0 ist)
-                        if ("ARBEITSPROBE" in q_name.upper() or "BOSS" in q_name.upper()) and display_xp == 0:
-                            display_xp = 2500
-                            
-                    # Wenn offen, zeige Master XP als "Soll"
+                    # When strict, do not treat text/checkbox as completion.
+                    # If student_xp == 0, show master_xp as 'Soll' for open quests.
                     if not is_completed and display_xp == 0:
                         display_xp = master_xp
 
