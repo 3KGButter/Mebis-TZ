@@ -188,8 +188,21 @@ try:
                 student_row = df_q.iloc[q_row_idx]
                 
                 st.divider()
-                quest_view = st.radio("", options=["⌛ Offene Quests", "✅ Erledigte Quests"], horizontal=True, key="quest_view")
-                show_done = quest_view == "✅ Erledigte Quests"
+                # Initialize quest view state
+                if "quest_view_state" not in st.session_state:
+                    st.session_state.quest_view_state = "open"
+                
+                # Toggle buttons for Offene/Erledigte
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("⌛ Offene Quests", use_container_width=True, key="btn_open"):
+                        st.session_state.quest_view_state = "open"
+                with col2:
+                    if st.button("✅ Erledigte Quests", use_container_width=True, key="btn_done"):
+                        st.session_state.quest_view_state = "done"
+                
+                show_done = st.session_state.quest_view_state == "done"
+                quest_view = "✅ Erledigte Quests" if show_done else "⌛ Offene Quests"
                 
                 st.subheader(quest_view)
 
@@ -296,7 +309,7 @@ try:
                             else:
                                 st.markdown(f"""
                                 <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
-                                            background-color:#f5f5f5; color:#333;">
+                                            background-color:#f5f5f5; color:#333; margin-bottom:15px;">
                                     <strong>{quest['name']}</strong><br>
                                     🔒 {quest['xp']} XP
                                 </div>
