@@ -304,16 +304,23 @@ try:
                     cols = st.columns(3)
                     for idx, quest in enumerate(quests_to_show):
                         with cols[idx % 3]:
-                            if quest["completed"]:
-                                st.success(f"**{quest['name']}**\n\n✨ +{quest['xp']} XP")
-                            else:
-                                st.markdown(f"""
-                                <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
-                                            background-color:#f5f5f5; color:#333; margin-bottom:15px;">
-                                    <strong>{quest['name']}</strong><br>
-                                    🔒 {quest['xp']} XP
-                                </div>
-                                """, unsafe_allow_html=True)
+                                    if quest["completed"]:
+                                        # Render completed quests with a consistent card style
+                                        st.markdown(f"""
+                                        <div style="border:2px solid #cfeadf; padding:20px; border-radius:10px; 
+                                                    background-color:#e8f9ef; color:#0b6b3a; margin-bottom:15px;">
+                                            <strong>{quest['name']}</strong><br>
+                                            ✨ +{quest['xp']} XP
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"""
+                                        <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
+                                                    background-color:#f5f5f5; color:#333; margin-bottom:15px;">
+                                            <strong>{quest['name']}</strong><br>
+                                            🔒 {quest['xp']} XP
+                                        </div>
+                                        """, unsafe_allow_html=True)
 
             else:
                 st.warning(f"Konnte Daten fÃ¼r '{real_name}' im Questbuch nicht finden.")
