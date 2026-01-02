@@ -22,7 +22,7 @@ def calculate_progress(current_xp):
             break
     
     if current_level >= 16:
-        return 1.0, "Maximales Level erreicht! 🏆"
+        return 1.0, "Maximales Level erreicht! ðŸ†"
     
     current_level_start = LEVEL_THRESHOLDS[current_level]
     next_level_start = LEVEL_THRESHOLDS[current_level + 1]
@@ -50,7 +50,7 @@ def clean_number(val):
         return 0
 
 def is_checkbox_checked(val):
-    """Prüft auf Checkboxen (True, 1, WAHR, CHECKED)."""
+    """PrÃ¼ft auf Checkboxen (True, 1, WAHR, CHECKED)."""
     if pd.isna(val): return False
     if isinstance(val, bool): return val
     if isinstance(val, (int, float)): return val >= 1
@@ -58,7 +58,7 @@ def is_checkbox_checked(val):
     return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
 
 # --- VERBINDUNG ---
-spreadsheet_id = "1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
+spreadsheet_title = "Mebis-TZ"
 blatt_xp = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
@@ -66,7 +66,7 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v31.0 - Tabs (Shop, Quests)")
+    st.caption("v30.0 - Final Logic (C=Name/Status, C+1=XP)")
     debug_mode = st.checkbox("🔍 Debug-Modus", value=False)
 
 try:
@@ -76,13 +76,23 @@ try:
     # 1. LOGIN & LEVEL (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
-        df_xp = conn.read(spreadsheet=spreadsheet_id, worksheet=blatt_xp, ttl=0)
+        df_xp = conn.read(spreadsheet=spreadsheet_title, worksheet=blatt_xp, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_xp}': {e}")
         if debug_mode:
             st.write("Debug - Exception Details:")
             st.exception(e)
         st.stop()
+
+        # Defensive checks: ensure the sheet has the expected shape (at least header + columns A-G)
+        if df_xp is None or df_xp.shape[0] < 2 or df_xp.shape[1] < 5:
+            st.error(f"Die Tabelle '{blatt_xp}' hat unerwartete Struktur: rows={0 if df_xp is None else df_xp.shape[0]}, cols={0 if df_xp is None else df_xp.shape[1]}")
+            if 'debug_mode' in locals() and debug_mode:
+                try:
+                    st.write(df_xp.head())
+                except:
+                    pass
+            st.stop()
 
     st.info("Bitte Gamertag eingeben:")
     gamertag_inp = st.text_input("Gamertag:", placeholder="z.B. BrAnt")
@@ -105,7 +115,7 @@ try:
                         raw_xp = row.iloc[col_i + 1]
                         raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
                         raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
-                        is_go = "💀" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
+                        is_go = "â€ " in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
                         stats = {
                             "xp": clean_number(raw_xp),
                             "level": raw_lvl,
@@ -120,7 +130,7 @@ try:
                 real_name = "Unbekannt"
 
             lvl_display = str(stats["level"])
-            if "💀" in lvl_display: lvl_display = "💀"
+            if "â€ " in lvl_display: lvl_display = "💀"
             else:
                 try: lvl_display = str(int(float(str(lvl_display).replace(',','.'))))
                 except: pass
@@ -146,16 +156,26 @@ try:
             # 2. QUESTBUCH (für Tabs 2 & 3)
             # ----------------------------------------------------------------
             try:
-                df_q = conn.read(spreadsheet=spreadsheet_id, worksheet=blatt_quests, header=None, ttl=0)
+                df_q = conn.read(spreadsheet=spreadsheet_title, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
+
+                # Defensive checks for Questbuch: need at least rows up to index 6 and columns from C
+                if df_q is None or df_q.shape[0] < 7 or df_q.shape[1] < 3:
+                    st.error(f"Die Tabelle '{blatt_quests}' hat unerwartete Struktur: rows={0 if df_q is None else df_q.shape[0]}, cols={0 if df_q is None else df_q.shape[1]}")
+                    if 'debug_mode' in locals() and debug_mode:
+                        try:
+                            st.write(df_q.head())
+                        except:
+                            pass
+                    st.stop()
 
             # --- HEADERS ---
             header_row = df_q.iloc[1]   # Zeile 2: Namen
             master_xp_row = df_q.iloc[4] # Zeile 5: Soll-XP
             
-            # --- SCHÜLERSUCHE ---
+            # --- SCHÃœLERSUCHE ---
             q_row_idx = -1
             search_str = real_name.lower()
             for k in ["11t1", "11t2", "11t3", "11t4"]: 
@@ -173,18 +193,36 @@ try:
                 if match:
                     q_row_idx = i; break
             
-            # --- TAB 1: SHOP ---
-            with tab1:
-                shop.show_shop(gamertag_inp, stats)
-
-            # --- TABS 2 & 3: QUESTS ---
             if q_row_idx != -1:
                 student_row = df_q.iloc[q_row_idx]
                 
-                # Collect quests
+                st.divider()
+                # Initialize quest view state
+                if "quest_view_state" not in st.session_state:
+                    st.session_state.quest_view_state = "open"
+                
+                # Toggle buttons for Offene/Erledigte
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("⌛ Offene Quests", use_container_width=True, key="btn_open"):
+                        st.session_state.quest_view_state = "open"
+                with col2:
+                    if st.button("✅ Erledigte Quests", use_container_width=True, key="btn_done"):
+                        st.session_state.quest_view_state = "done"
+                
+                show_done = st.session_state.quest_view_state == "done"
+                quest_view = "✅ Erledigte Quests" if show_done else "⌛ Offene Quests"
+                
+                st.subheader(quest_view)
+
+                cnt = 0
+                found_any = False
+                processed_cols = set()
+
+                # Collect quests first, then render according to `show_done`.
                 completed_quests = []
                 open_quests = []
-                processed_cols = set()
+
                 max_cols = len(header_row)
                 
                 # --- QUEST LOOP ---
@@ -205,72 +243,100 @@ try:
                     if q_name_clean in ["quest", "quest ", "kachel", "code", "levelaufstieg?", "bezeichnung"]: continue
                     if any(s in q_name_clean for s in ["questart", "summe", "total", "gold"]): continue
                     
-                    # Master XP
+                    # --- DATEN HOLEN (Spalte C = Name/Master/Status, Spalte C+1 = XP) ---
+                    
+                    # A. Master XP (Zeile 5, Spalte C)
                     master_xp = 0
                     try:
                         master_xp = clean_number(master_xp_row.iloc[c])
                     except: pass
                     
-                    # Schüler Daten
+                    # B. SchÃ¼ler Daten
+                    status_text = ""
+                    status_raw = None
                     student_xp = 0
+                    
+                    # Status lesen (Spalte C)
+                    try:
+                        if c < len(student_row):
+                            status_raw = student_row.iloc[c]
+                            status_text = str(status_raw).strip().upper()
+                    except: pass
+                    
+                    # XP lesen (Spalte C+1 -> RECHTS!)
                     try:
                         if c+1 < len(student_row):
                             student_xp = clean_number(student_row.iloc[c+1])
                     except: pass
 
-                    # Entscheidung
-                    is_completed = student_xp > 0
-                    display_xp = student_xp if is_completed else master_xp
+                    # --- ENTSCHEIDUNG ---
+                    is_completed = False
+                    
+                    # 1. Punkte > 0
+                    if student_xp > 0:
+                        is_completed = True
+                    # Strict rule: only numeric XP > 0 marks completion.
+                    # Previously text/checkbox could mark completion even if XP == 0.
+                    
+                    # --- XP ANZEIGE ---
+                    display_xp = student_xp
+                    # When strict, do not treat text/checkbox as completion.
+                    # If student_xp == 0, show master_xp as 'Soll' for open quests.
+                    if not is_completed and display_xp == 0:
+                        display_xp = master_xp
 
-                    # Sammeln
+                    # --- AUSGABE (Sammeln) ---
                     quest_entry = {"name": q_name, "xp": display_xp, "completed": is_completed}
                     if is_completed:
                         completed_quests.append(quest_entry)
                     else:
                         open_quests.append(quest_entry)
                     
+                    # Spalte C verarbeitet. C+1 (XP) Ã¼berspringen wir explizit.
                     processed_cols.add(c)
                     processed_cols.add(c+1)
 
-                # --- TAB 2: OFFENE QUESTS ---
-                with tab2:
-                    st.subheader("⌛ Offene Quests")
-                    if not open_quests:
-                        st.success("Keine offenen Quests mehr!")
-                    else:
-                        cols = st.columns(3)
-                        for idx, quest in enumerate(open_quests):
-                            with cols[idx % 3]:
-                                st.markdown(f"""
-                                <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
-                                            background-color:#f5f5f5; color:#333; margin-bottom:15px;">
-                                    <strong>{quest['name']}</strong><br>
-                                    🔒 {quest['xp']} XP
-                                </div>
-                                """, unsafe_allow_html=True)
+                # Wähle die passende Liste zum Anzeigen
+                quests_to_show = completed_quests if show_done else open_quests
 
-                # --- TAB 3: ERLEDIGTE QUESTS ---
-                with tab3:
-                    st.subheader("✅ Erledigte Quests")
-                    if not completed_quests:
+                if debug_mode:
+                    st.write(f"Debug: show_done={show_done}, completed={len(completed_quests)}, open={len(open_quests)}")
+                    st.write("Beispiel abgeschl.:", completed_quests[:3])
+                    st.write("Beispiel offen:", open_quests[:3])
+
+                if not quests_to_show:
+                    if show_done:
                         st.info("Noch keine Quests erledigt.")
                     else:
-                        cols = st.columns(3)
-                        for idx, quest in enumerate(completed_quests):
-                            with cols[idx % 3]:
-                                st.markdown(f"""
-                                <div style="border:2px solid #cfeadf; padding:20px; border-radius:10px; 
-                                            background-color:#e8f9ef; color:#0b6b3a; margin-bottom:15px;">
-                                    <strong>{quest['name']}</strong><br>
-                                    ✨ +{quest['xp']} XP
-                                </div>
-                                """, unsafe_allow_html=True)
+                        st.success("Keine offenen Quests mehr!")
+                else:
+                    cols = st.columns(3)
+                    for idx, quest in enumerate(quests_to_show):
+                        with cols[idx % 3]:
+                                    if quest["completed"]:
+                                        # Render completed quests with a consistent card style
+                                        st.markdown(f"""
+                                        <div style="border:2px solid #cfeadf; padding:20px; border-radius:10px; 
+                                                    background-color:#e8f9ef; color:#0b6b3a; margin-bottom:15px;">
+                                            <strong>{quest['name']}</strong><br>
+                                            ✨ +{quest['xp']} XP
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    else:
+                                        st.markdown(f"""
+                                        <div style="border:2px solid #ccc; padding:20px; border-radius:10px; 
+                                                    background-color:#f5f5f5; color:#333; margin-bottom:15px;">
+                                            <strong>{quest['name']}</strong><br>
+                                            🔒 {quest['xp']} XP
+                                        </div>
+                                        """, unsafe_allow_html=True)
 
             else:
-                st.warning(f"Konnte Daten für '{real_name}' im Questbuch nicht finden.")
+                st.warning(f"Konnte Daten fÃ¼r '{real_name}' im Questbuch nicht finden.")
 
         else:
             st.error("Gamertag nicht gefunden.")
 
 except Exception as e:
     st.error(f"Fehler: {e}")
+
