@@ -58,7 +58,7 @@ def is_checkbox_checked(val):
     return s in ["TRUE", "WAHR", "1", "CHECKED", "YES", "ON"]
 
 # --- VERBINDUNG ---
-url = "https://docs.google.com/spreadsheets/d/1xfAbOwU6DrbHgZX5AexEl3pedV9vTxyTFbXrIU06O7Q"
+spreadsheet_title = "Mebis-TZ"
 blatt_xp = "XP Rechner 3.0"
 blatt_quests = "Questbuch 4.0"
 
@@ -76,9 +76,12 @@ try:
     # 1. LOGIN & LEVEL (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
-        df_xp = conn.read(spreadsheet=url, worksheet=blatt_xp, header=1, ttl=0)
+        df_xp = conn.read(spreadsheet=spreadsheet_title, worksheet=blatt_xp, ttl=0)
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_xp}': {e}")
+        if debug_mode:
+            st.write("Debug - Exception Details:")
+            st.exception(e)
         st.stop()
 
         # Defensive checks: ensure the sheet has the expected shape (at least header + columns A-G)
@@ -152,7 +155,7 @@ try:
             # 2. QUESTBUCH
             # ----------------------------------------------------------------
             try:
-                df_q = conn.read(spreadsheet=url, worksheet=blatt_quests, header=None, ttl=0)
+                df_q = conn.read(spreadsheet=spreadsheet_title, worksheet=blatt_quests, header=None, ttl=0)
             except:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
