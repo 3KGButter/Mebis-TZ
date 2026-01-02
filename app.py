@@ -87,7 +87,11 @@ try:
     # 1. LOGIN & LEVEL (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
-        df_xp = pd.DataFrame(spreadsheet.worksheet(blatt_xp).get_all_values()[1:])
+        raw_data = spreadsheet.worksheet(blatt_xp).get_all_values()
+        if debug_mode:
+            st.write("🔍 **DEBUG - XP Rechner Rohdata (erste 5 Zeilen):**")
+            st.write(raw_data[:5])
+        df_xp = pd.DataFrame(raw_data[1:])
         if len(df_xp) == 0:
             raise ValueError("Leeres Sheet")
     except Exception as e:
@@ -97,6 +101,13 @@ try:
             st.exception(e)
         st.stop()
 
+    if debug_mode:
+        st.write("🔍 **DEBUG - DataFrame Shape & Columns:**")
+        st.write(f"Shape: {df_xp.shape}")
+        st.write(f"Columns: {list(df_xp.columns)}")
+        st.write("🔍 **DEBUG - Erste 5 Zeilen DataFrame:**")
+        st.write(df_xp.head())
+
     st.info("Bitte Gamertag eingeben:")
     gamertag_inp = st.text_input("Gamertag:", placeholder="z.B. BrAnt")
 
@@ -105,26 +116,46 @@ try:
         found_idx = -1
         stats = None
         
-        start_col = 11
-        for col_i in range(start_col, len(df_xp.columns)):
-            col_header = str(df_xp.columns[col_i]).strip()
-            if "Gamertag" in col_header:
-                col_vals = df_xp.iloc[:, col_i].astype(str).str.strip().str.lower()
-                matches = col_vals[col_vals == user_tag].index
-                if not matches.empty:
-                    found_idx = matches[0]
-                    row = df_xp.iloc[found_idx]
-                    if col_i + 2 < len(df_xp.columns):
-                        raw_xp = row.iloc[col_i + 1]
-                        raw_lvl = row.iloc[col_i + 2] if col_i + 2 < len(df_xp.columns) else 0
-                        raw_info = str(row.iloc[col_i + 3]) if col_i + 3 < len(df_xp.columns) else ""
-                        is_go = "💀" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
-                        stats = {
-                            "xp": clean_number(raw_xp),
-                            "level": raw_lvl,
-                            "is_go": is_go
-                        }
-                    break
+        if debug_mode:
+            st.write(f"🔍 **DEBUG - Suche nach Gamertag:** '{user_tag}'")
+        
+        # Suche in allen Spalten nach "Gamertag"
+        found_tag_col = -1
+        for col_i in range(len(df_xp.columns)):
+            col_header = str(df_xp.columns[col_i]).strip().lower()
+            if "gamertag" in col_header:
+                found_tag_col = col_i
+                if debug_mode:
+                    st.write(f"🔍 **DEBUG - Gamertag-Spalte gefunden bei Index:** {col_i}")
+                break
+        
+        if found_tag_col == -1:
+            if debug_mode:
+                st.write("🔍 **DEBUG - KEINE Gamertag-Spalte gefunden! Zeige alle Spalten:**")
+                for i, col in enumerate(df_xp.columns):
+                    st.write(f"  Spalte {i}: '{col}'")
+        else:
+            col_vals = df_xp.iloc[:, found_tag_col].astype(str).str.strip().str.lower()
+            matches = col_vals[col_vals == user_tag].index
+            if debug_mode:
+                st.write(f"🔍 **DEBUG - Werte in Gamertag-Spalte (erste 10):** {list(col_vals.head(10))}")
+                st.write(f"🔍 **DEBUG - Matches gefunden:** {list(matches)}")
+            
+            if not matches.empty:
+                found_idx = matches[0]
+                row = df_xp.iloc[found_idx]
+                if found_tag_col + 2 < len(df_xp.columns):
+                    raw_xp = row.iloc[found_tag_col + 1]
+                    raw_lvl = row.iloc[found_tag_col + 2] if found_tag_col + 2 < len(df_xp.columns) else 0
+                    raw_info = str(row.iloc[found_tag_col + 3]) if found_tag_col + 3 < len(df_xp.columns) else ""
+                    is_go = "💀" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
+                    stats = {
+                        "xp": clean_number(raw_xp),
+                        "level": raw_lvl,
+                        "is_go": is_go
+                    }
+                    if debug_mode:
+                        st.write(f"🔍 **DEBUG - Stats gefunden:** {stats}")
         
         if stats and found_idx != -1:
             try:
