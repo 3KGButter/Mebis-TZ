@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from google.oauth2.service_account import Credentials
 import shop
 
 # --- KONFIGURATION ---
@@ -66,17 +67,29 @@ with st.sidebar:
     if st.button("🔄 Aktualisieren"):
         st.cache_data.clear()
         st.rerun()
-    st.caption("v31.0 - Tabs (Shop, Quests)")
+    st.caption("v31.0 - Tabs (Shop, Quests) + gspread")
     debug_mode = st.checkbox("🔍 Debug-Modus", value=False)
 
 try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Authentifizierung mit Google Sheets via gspread
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
+        st.secrets["connections"]["gsheets"],
+        scopes=scopes
+    )
+    gc = gspread.authorize(credentials)
+    spreadsheet = gc.open_by_key(spreadsheet_id)
 
     # ----------------------------------------------------------------
     # 1. LOGIN & LEVEL (XP Rechner 3.0)
     # ----------------------------------------------------------------
     try:
-        df_xp = conn.read(spreadsheet=spreadsheet_id, worksheet=blatt_xp, ttl=0)
+        df_xp = pd.DataFrame(spreadsheet.worksheet(blatt_xp).get_all_values()[1:])
+        if len(df_xp) == 0:
+            raise ValueError("Leeres Sheet")
     except Exception as e:
         st.error(f"Fehler beim Laden von '{blatt_xp}': {e}")
         if debug_mode:
@@ -146,7 +159,7 @@ try:
             # 2. QUESTBUCH (für Tabs 2 & 3)
             # ----------------------------------------------------------------
             try:
-                df_q = conn.read(spreadsheet=spreadsheet_id, worksheet=blatt_quests, header=None, ttl=0)
+                df_q = pd.DataFrame(spreadsheet.worksheet(blatt_quests).get_all_values())
             except:
                 st.warning("Questbuch nicht gefunden.")
                 st.stop()
@@ -274,3 +287,5 @@ try:
 
 except Exception as e:
     st.error(f"Fehler: {e}")
+    if debug_mode:
+        st.exception(e)
