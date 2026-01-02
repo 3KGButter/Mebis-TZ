@@ -1,0 +1,23 @@
+[
+  {
+    "id": "hat",
+    "name": "Roter Hut",
+    "price": 30,
+    "color": "#c0392b",
+    "layer": "hat"
+  },
+  {
+    "id": "cape",
+    "name": "Blauer Umhang",
+    "price": 50,
+    "color": "#2980b9",
+    "layer": "cape"
+  },
+  {
+    "id": "sword",
+    "name": "Bronzeschwert",
+    "price": 70,
+    "color": "#b8860b",
+    "layer": "sword"
+  }
+]
