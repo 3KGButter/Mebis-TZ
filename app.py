@@ -115,14 +115,17 @@ try:
         user_tag = gamertag_inp.strip().lower()
         found_idx = -1
         stats = None
+        real_name = "Unbekannt"
         
         if debug_mode:
             st.write(f"🔍 **DEBUG - Suche nach Gamertag:** '{user_tag}'")
         
-        # Suche in allen Spalten nach "Gamertag"
+        # Gamertag-Spalte finden (zuerst Spalte 4, dann andere durchsuchen)
         found_tag_col = -1
-        for col_i in range(len(df_xp.columns)):
-            col_header = str(df_xp.columns[col_i]).strip().lower()
+        for col_i in [4] + list(range(len(df_xp.columns))):
+            if col_i >= len(df_xp.columns):
+                break
+            col_header = str(df_xp.iloc[0, col_i]).strip().lower()
             if "gamertag" in col_header:
                 found_tag_col = col_i
                 if debug_mode:
@@ -130,12 +133,9 @@ try:
                 break
         
         if found_tag_col == -1:
-            if debug_mode:
-                st.write("🔍 **DEBUG - KEINE Gamertag-Spalte gefunden! Zeige alle Spalten:**")
-                for i, col in enumerate(df_xp.columns):
-                    st.write(f"  Spalte {i}: '{col}'")
+            st.error("Gamertag-Spalte nicht gefunden!")
         else:
-            col_vals = df_xp.iloc[:, found_tag_col].astype(str).str.strip().str.lower()
+            col_vals = df_xp.iloc[1:, found_tag_col].astype(str).str.strip().str.lower()
             matches = col_vals[col_vals == user_tag].index
             if debug_mode:
                 st.write(f"🔍 **DEBUG - Werte in Gamertag-Spalte (erste 10):** {list(col_vals.head(10))}")
@@ -144,10 +144,24 @@ try:
             if not matches.empty:
                 found_idx = matches[0]
                 row = df_xp.iloc[found_idx]
-                if found_tag_col + 2 < len(df_xp.columns):
-                    raw_xp = row.iloc[found_tag_col + 1]
-                    raw_lvl = row.iloc[found_tag_col + 2] if found_tag_col + 2 < len(df_xp.columns) else 0
-                    raw_info = str(row.iloc[found_tag_col + 3]) if found_tag_col + 3 < len(df_xp.columns) else ""
+                
+                # Extrahiere Name
+                try:
+                    first_name = str(row.iloc[0]).strip()
+                    last_name = str(row.iloc[1]).strip()
+                    real_name = f"{last_name} {first_name}"
+                except:
+                    real_name = "Unbekannt"
+                
+                # XP, Level, Stufe - Offsets hängen von Gamertag-Spalte ab
+                xp_col = found_tag_col + 3  # XP Bereich
+                lvl_col = found_tag_col + 4  # Level
+                stufe_col = found_tag_col + 5  # Stufe
+                
+                if xp_col < len(df_xp.columns):
+                    raw_xp = row.iloc[xp_col]
+                    raw_lvl = row.iloc[lvl_col] if lvl_col < len(df_xp.columns) else 0
+                    raw_info = str(row.iloc[stufe_col]) if stufe_col < len(df_xp.columns) else ""
                     is_go = "💀" in str(raw_lvl) or "game" in raw_info.lower() or "over" in raw_info.lower()
                     stats = {
                         "xp": clean_number(raw_xp),
@@ -155,14 +169,11 @@ try:
                         "is_go": is_go
                     }
                     if debug_mode:
+                        st.write(f"🔍 **DEBUG - XP-Spalte:** {xp_col}, Wert: {raw_xp}")
+                        st.write(f"🔍 **DEBUG - Level-Spalte:** {lvl_col}, Wert: {raw_lvl}")
                         st.write(f"🔍 **DEBUG - Stats gefunden:** {stats}")
         
         if stats and found_idx != -1:
-            try:
-                real_name = str(df_xp.iloc[found_idx, 3])
-            except:
-                real_name = "Unbekannt"
-
             lvl_display = str(stats["level"])
             if "💀" in lvl_display: lvl_display = "💀"
             else:
